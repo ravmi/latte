@@ -1,0 +1,5 @@
+int main() {
+    boolean a = true;
+    boolean b = false;
+    boolean c = a + b;
+    }

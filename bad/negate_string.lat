@@ -1,0 +1,4 @@
+int main () {
+    string a = "sdf";
+    string b = -a;
+}

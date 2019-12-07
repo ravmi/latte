@@ -1,0 +1,8 @@
+int a (int p, int q) {
+    return p + q;
+}
+
+int main() {
+    int val = a (5, 4, 3);
+    return 0;
+}

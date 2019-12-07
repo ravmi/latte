@@ -1,0 +1,8 @@
+int a () {
+    return 12;
+}
+
+
+boolean b (boolean a) {
+    return a;
+}

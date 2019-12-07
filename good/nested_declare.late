@@ -1,0 +1,12 @@
+int main() {
+    int a;
+    {
+        string a;
+        string b;
+        {
+            int a;
+            int b = a;
+        }
+    }
+    return a;
+}

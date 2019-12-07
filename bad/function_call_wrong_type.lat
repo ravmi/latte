@@ -1,0 +1,9 @@
+void a (int b) {
+    printInt(b);
+    return;
+}
+
+int main () {
+    boolean arg = true;
+    a(arg);
+}

@@ -1,0 +1,6 @@
+int a () {
+    return 12;
+}
+string a () {
+    return "asdf";
+}
