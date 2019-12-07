@@ -70,8 +70,8 @@ putExpectRetType new = do
 
 
 -- this allows to run block without affecting environument outisde of the block.
-constState :: Eval a -> Eval a
-constState p = do
+preserveState :: Eval a -> Eval a
+preserveState p = do
     s <- get
     x <- p
     put s
@@ -89,6 +89,7 @@ allocateVar varName varType = do
     locs <- gets locations
     putMemory freeLoc varType
     putLocations varName freeLoc
+    putFreeLocation $ freeLoc + 1
     return ()
 
 lookupType :: Ident -> Eval Type
@@ -102,15 +103,6 @@ lookupType name = do
         _ -> throwError $ varUnitialized name
 
 
-declare :: Ident -> Type -> Eval ()
-declare varName varType = do
-    locs <- gets locations
-    startLoc <- gets blockStart
-    case Map.lookup varName locs of
-        Just location -> case location < startLoc of
-            True -> allocateVar varName varType
-            False -> throwError $ alreadyDeclared varName
-        _ -> allocateVar varName varType
 
 deduceType :: Expr -> Eval (Type)
 deduceType (EVar name) = lookupType name
@@ -179,6 +171,124 @@ deduceType (EOr exp1 exp2) = do
         True -> return $ ev1
         False -> throwError "bad or"
 
+runBlock :: Block -> Eval ()
+runBlock (Block statements) = do
+    freeLoc <- gets freeLocation
+    putBlockStart freeLoc
+    mapM_ runStmt statements
+
+
+declare :: Ident -> Type -> Eval ()
+declare varName varType = do
+    locs <- gets locations
+    startLoc <- gets blockStart
+    case Map.lookup varName locs of
+        Just location -> case location < startLoc of
+            True -> allocateVar varName varType
+            False -> throwError $ alreadyDeclared varName
+        _ -> allocateVar varName varType
+
+declareItem :: Type -> Item -> Eval ()
+declareItem expectedType (NoInit varName) = do
+    declare varName expectedType
+
+declareItem expectedType (Init varName expr) = do
+    expressionType <- deduceType expr
+    case expressionType == expectedType of
+        True -> declare varName expressionType
+        False -> throwError "trying to init with wrong type"
 
 runStmt :: Stmt -> Eval ()
+runStmt Empty = return ()
+runStmt (BStmt block) = preserveState (runBlock block)
+runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
+runStmt (Ass varName expr) = do
+    expressionType <- deduceType expr
+    varType <- deduceType (EVar varName)
+    case expressionType == varType of
+        True -> return ()
+        False -> throwError "trying to assign to wrong type"
+
+runStmt (Incr varName) = do
+    varType <- deduceType (EVar varName)
+    case varType == Int of
+        True -> return ()
+        False -> throwError "incrementing not an integer"
+
+runStmt (Decr varName) = do
+    varType <- deduceType (EVar varName)
+    case varType == Int of
+        True -> return ()
+        False -> throwError "decrementing not an integer"
+
+runStmt (Ret expr) = do
+    expressionType <- deduceType expr
+    expectedType <- gets expectRetType
+    case expressionType == expectedType of
+        True -> return ()
+        False -> throwError "Inoorrect return type or double return"
+
+runStmt (Cond expr stmt) = do
+    expressionType <- deduceType expr
+    case expressionType == Bool of
+        True -> return ()
+        False -> throwError "not a bool in if"
+    runStmt stmt
+
+runStmt (CondElse expr stmt1 stmt2) = do
+    expressionType <- deduceType expr
+    case expressionType == Bool of
+        True -> return ()
+        False -> throwError "not a bool in if"
+    runStmt stmt1
+    runStmt stmt2
+
+runStmt (While expr stmt) = do
+    expressionType <- deduceType expr
+    case expressionType == Bool of
+        True -> return ()
+        False -> throwError "not a bool in if"
+    runStmt stmt
+
+runStmt (SExp expr) = do
+    deduceType expr
+    return ()
+
+runTopDef :: TopDef -> Eval ()
+runTopDef (FnDef retType funName arguments block) = do
+    putExpectRetType retType
+
+getArgNames :: [Arg] -> Eval [Ident]
+getArgNames arguments = do
+    let
+        getName (Arg _ argName) = argName
+        argNames = map getName arguments in
+        case (length (nub argNames)) == (length argNames) of
+            True -> return argNames
+            False -> throwError "repeating argnames"
+
+getArgTypes :: [Arg] -> Eval [Type]
+getArgTypes arguments = do
+    let
+        getType (Arg argType _) = argType
+        argTypes = map getType arguments in
+        return argTypes
+
+declareFun :: TopDef -> Eval ()
+declareFun (FnDef retType funName arguments _) = do
+    argTypes <- getArgTypes arguments
+    declare funName (Fun retType argTypes)
+
+defineFun :: TopDef -> Eval ()
+defineFun (FnDef retType funName arguments block) = do
+    argNames <- getArgNames arguments
+    argTypes <- getArgTypes arguments
+    --save state here
+    mapM_ (uncurry declare) (zip argNames argTypes)
+    runBlock block
+
+runProgram :: Program -> Eval ()
+runProgram (Program defList) = do
+    mapM_ declareFun defList
+    mapM_ (preserveState . defineFun) defList
 
