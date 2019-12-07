@@ -79,9 +79,9 @@ preserveState p = do
 
 -- @TODO
 varUnitialized :: Ident -> String
-varUnitialized x = ""
+varUnitialized x = "unitialized"
 alreadyDeclared :: Ident -> String
-alreadyDeclared x = ""
+alreadyDeclared x = "already declared"
 
 allocateVar :: Ident -> Type -> Eval ()
 allocateVar varName varType = do
@@ -150,12 +150,19 @@ deduceType (EAdd exp1 _ exp2) = do
         True -> return $ ev1
         False -> throwError "bad add"
 
+deduceType (ERel exp1 EQU exp2) = do
+    ev1 <- deduceType exp1
+    ev2 <- deduceType exp2
+    case (ev1 == ev2) && (ev1 == Int || ev1 == Str || ev1 == Bool) of
+        True -> return Bool
+        False -> throwError "wwrong types in bool"
+
 deduceType (ERel exp1 _ exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    case ev1 == Bool && ev2 == Bool of
+    case ev1 == Int && ev2 == Int of
         True -> return Bool
-        False -> throwError "wrong types in bool"
+        False -> throwError "gwrong types in bool"
 
 deduceType (EAnd exp1 exp2) = do
     ev1 <- deduceType exp1
@@ -228,6 +235,12 @@ runStmt (Ret expr) = do
         True -> return ()
         False -> throwError "Inoorrect return type or double return"
 
+runStmt (VRet) = do
+    expectedType <- gets expectRetType
+    case expectedType == Void of
+        True -> return ()
+        False -> throwError "Inoorrect return type or double return"
+
 runStmt (Cond expr stmt) = do
     expressionType <- deduceType expr
     case expressionType == Bool of
@@ -283,13 +296,20 @@ defineFun :: TopDef -> Eval ()
 defineFun (FnDef retType funName arguments block) = do
     argNames <- getArgNames arguments
     argTypes <- getArgTypes arguments
-    --save state here
+    putExpectRetType retType
     mapM_ (uncurry declare) (zip argNames argTypes)
     runBlock block
 
+declareNativeFunctions :: Eval ()
+declareNativeFunctions = do
+    declare (Ident "printInt") (Fun Void [Int])
+
 runProgram :: Program -> Eval ()
 runProgram (Program defList) = do
+    declareNativeFunctions
     mapM_ declareFun defList
+    freeLoc <- gets freeLocation
+    putBlockStart freeLoc
     mapM_ (preserveState . defineFun) defList
 
 
@@ -300,7 +320,7 @@ runText s = let ts = myLexer s in case pProgram ts of
                 exitFailure
     Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void) (runProgram tree) of
         Right ((), writ) -> return $ "All is OK"
-        Left errMessage -> do hPutStr stderr errMessage
+        Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
 
 
