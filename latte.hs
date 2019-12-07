@@ -9,10 +9,8 @@ import Data.List
 import Data.List.Split
 import qualified Data.Set as Set
 import qualified Data.Map as Map
-import System.IO ( stdin, hGetContents )
 import System.Environment ( getArgs, getProgName )
 import System.Exit ( exitFailure, exitSuccess )
-
 import System.IO
 import LexLatte
 import ParLatte
@@ -27,7 +25,6 @@ type Location = Integer
 type Locations = Map.Map Ident Location
 -- describes what memory looks like (only types for now)
 type Memory = Map.Map Location Type
-
 
 -- in current state we want to keep locations of variables, state of the memory,
 -- current free avaliable memory location, location of beginning of the block
@@ -67,9 +64,7 @@ putExpectRetType new = do
     ProgState memory locs bs fl ert <- get
     put $ ProgState memory locs bs fl new
 
-
-
--- this allows to run block without affecting environument outisde of the block.
+-- this allows to run block without affecting environment outside of the block.
 preserveState :: Eval a -> Eval a
 preserveState p = do
     s <- get
@@ -77,11 +72,41 @@ preserveState p = do
     put s
     return x
 
--- @TODO
-varUnitialized :: Ident -> String
-varUnitialized x = "unitialized"
+varUninitialized :: Ident -> String
+varUninitialized (Ident varName) = "`" ++ varName ++  "`" ++ " uninitialized"
+
 alreadyDeclared :: Ident -> String
-alreadyDeclared x = "already declared"
+alreadyDeclared (Ident varName) = "`" ++ varName ++  "`" ++ " declared before in the same scope"
+
+unexpected :: String
+unexpected = "Something very bad happened"
+
+badApply :: Ident -> [Type] -> [Type] -> String
+badApply (Ident funName) okTypes badTypes = errLog where
+    why = "Wrong usage of function: `" ++ funName ++ "`"
+    expected = "expected arguments: " ++ (show okTypes)
+    used = "used: " ++ (show badTypes)
+    errLog = why ++ "; " ++ expected ++ "; " ++ used
+
+badTypesSuggestion :: (Show a, Show b) => String -> a -> b -> String
+badTypesSuggestion opName okTypes badTypes = errLog where
+    why = "Wrong usage of " ++ opName
+    expected = "expected type: " ++ (show okTypes)
+    used = "used: " ++ (show badTypes)
+    errLog = why ++ "; " ++ expected ++ "; " ++ used
+
+badTypes :: (Show a) => String -> a -> String
+badTypes opName badTypes = errLog where
+    why = "Wrong usage of " ++ opName
+    used = "used: " ++ (show badTypes)
+    errLog = why ++ "; " ++ "; " ++ used
+
+repeatingArgs :: [Arg] -> String
+repeatingArgs arguments = errLog where
+    why = "Some of the argument names repeat"
+    showArg (Arg varType (Ident varName)) = show varType ++ " " ++ varName
+    argList = map showArg arguments
+    errLog = why ++ ": " ++ "[" ++ (intercalate ", " argList) ++ "]"
 
 allocateVar :: Ident -> Type -> Eval ()
 allocateVar varName varType = do
@@ -99,10 +124,8 @@ lookupType name = do
     case Map.lookup name locs of
         Just location -> case Map.lookup location mem of
             Just varType -> return varType
-            _ -> throwError "something very bad"
-        _ -> throwError $ varUnitialized name
-
-
+            _ -> throwError unexpected
+        _ -> throwError $ varUninitialized name
 
 deduceType :: Expr -> Eval (Type)
 deduceType (EVar name) = lookupType name
@@ -114,76 +137,75 @@ deduceType (EApp funName funArgs) = do
     argTypes <- mapM deduceType funArgs
     case argTypes == expectedArgTypes of
         True -> return expectedRet
-        False -> throwError "wrong arguments types applied"
-
+        False -> throwError (badApply funName expectedArgTypes argTypes)
 
 deduceType (EString _) = return Str
 deduceType (Neg expr) = do
     expType <- deduceType expr
     case expType of
         Int -> return $ Int
-        _ -> throwError "Incorrect minus"
+        _ -> throwError $ badTypesSuggestion "`-`" Int expType
+
 deduceType (Not expr) = do
     expType <- deduceType expr
     case expType of
         Bool -> return $ Bool
-        _ -> throwError "Incorrect not"
+        _ -> throwError $ badTypesSuggestion "`!`" Bool expType
+
 deduceType (EMul e1 _ e2) = do
     ev1 <- deduceType e1
     ev2 <- deduceType e2
     case ev1 == Int && ev2 == Int of
         True -> return $ ev1
-        False -> throwError "bad multiply"
+        False -> throwError $ badTypesSuggestion "`*`" [Int, Int] [ev1, ev2]
+
 deduceType (EAdd exp1 Plus exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    case ev1 == ev2 of
-        True -> case ev1 == Str || ev1 == Int of
-            True -> return ev1
-            False -> throwError "bad types"
-        False -> throwError "bad types"
+    case ev1 == ev2 && (ev1 == Str || ev1 == Int) of
+        True -> return ev1
+        False -> throwError $ badTypes "`+`" [ev1, ev2]
 
 deduceType (EAdd exp1 _ exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
     case ev1 == Int && ev2 == Int of
         True -> return $ ev1
-        False -> throwError "bad add"
+        False -> throwError $ badTypes "`+`" [ev1, ev2]
 
 deduceType (ERel exp1 EQU exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
     case (ev1 == ev2) && (ev1 == Int || ev1 == Str || ev1 == Bool) of
         True -> return Bool
-        False -> throwError "wwrong types in bool"
+        False -> throwError $ badTypes "`==`" [ev1, ev2]
 
 deduceType (ERel exp1 _ exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
     case ev1 == Int && ev2 == Int of
         True -> return Bool
-        False -> throwError "gwrong types in bool"
+        False -> throwError $ badTypesSuggestion "comparison operator" [Int, Int] [ev1, ev2]
 
 deduceType (EAnd exp1 exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
     case ev1 == Bool && ev2 == Bool of
         True -> return $ ev1
-        False -> throwError "bad and"
+        False -> throwError $ badTypesSuggestion "&&" [Bool, Bool] [ev1, ev2]
 
 deduceType (EOr exp1 exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
     case ev1 == Bool && ev2 == Bool of
         True -> return $ ev1
-        False -> throwError "bad or"
+        False -> throwError $ badTypesSuggestion "||" [Bool, Bool] [ev1, ev2]
 
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
     freeLoc <- gets freeLocation
     putBlockStart freeLoc
     mapM_ runStmt statements
-
 
 declare :: Ident -> Type -> Eval ()
 declare varName varType = do
@@ -203,7 +225,7 @@ declareItem expectedType (Init varName expr) = do
     expressionType <- deduceType expr
     case expressionType == expectedType of
         True -> declare varName expressionType
-        False -> throwError "trying to init with wrong type"
+        False -> throwError $ badTypesSuggestion "assignment" expectedType expressionType
 
 runStmt :: Stmt -> Eval ()
 runStmt Empty = return ()
@@ -214,45 +236,45 @@ runStmt (Ass varName expr) = do
     varType <- deduceType (EVar varName)
     case expressionType == varType of
         True -> return ()
-        False -> throwError "trying to assign to wrong type"
+        False -> throwError $ badTypesSuggestion "assignment" varType expressionType
 
 runStmt (Incr varName) = do
     varType <- deduceType (EVar varName)
     case varType == Int of
         True -> return ()
-        False -> throwError "incrementing not an integer"
+        False -> throwError $ badTypesSuggestion "++" Int varType
 
 runStmt (Decr varName) = do
     varType <- deduceType (EVar varName)
     case varType == Int of
         True -> return ()
-        False -> throwError "decrementing not an integer"
+        False -> throwError $ badTypesSuggestion "--" Int varType
 
 runStmt (Ret expr) = do
     expressionType <- deduceType expr
     expectedType <- gets expectRetType
     case expressionType == expectedType of
         True -> return ()
-        False -> throwError "Inoorrect return type or double return"
+        False -> throwError $ badTypesSuggestion "return statement" expectedType expressionType
 
 runStmt (VRet) = do
     expectedType <- gets expectRetType
     case expectedType == Void of
         True -> return ()
-        False -> throwError "Inoorrect return type or double return"
+        False -> throwError $ badTypesSuggestion "return statement" expectedType Void
 
 runStmt (Cond expr stmt) = do
     expressionType <- deduceType expr
     case expressionType == Bool of
         True -> return ()
-        False -> throwError "not a bool in if"
+        False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
     runStmt stmt
 
 runStmt (CondElse expr stmt1 stmt2) = do
     expressionType <- deduceType expr
     case expressionType == Bool of
         True -> return ()
-        False -> throwError "not a bool in if"
+        False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
     runStmt stmt1
     runStmt stmt2
 
@@ -260,7 +282,7 @@ runStmt (While expr stmt) = do
     expressionType <- deduceType expr
     case expressionType == Bool of
         True -> return ()
-        False -> throwError "not a bool in if"
+        False -> throwError $ badTypesSuggestion "while statement" Bool expressionType
     runStmt stmt
 
 runStmt (SExp expr) = do
@@ -278,7 +300,7 @@ getArgNames arguments = do
         argNames = map getName arguments in
         case (length (nub argNames)) == (length argNames) of
             True -> return argNames
-            False -> throwError "repeating argnames"
+            False -> throwError $ repeatingArgs arguments
 
 getArgTypes :: [Arg] -> Eval [Type]
 getArgTypes arguments = do
@@ -312,7 +334,6 @@ runProgram (Program defList) = do
     putBlockStart freeLoc
     mapM_ (preserveState . defineFun) defList
 
-
 runText :: String -> IO String
 runText s = let ts = myLexer s in case pProgram ts of
     Bad s -> do hPutStrLn stderr "\nParse              Failed...\n"
@@ -323,7 +344,6 @@ runText s = let ts = myLexer s in case pProgram ts of
         Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
 
-
 main :: IO ()
 main = do
     args <- getArgs
@@ -333,4 +353,3 @@ main = do
             runText code
             return ()
         _ -> hPutStrLn stderr  "Only one argument!"
-
