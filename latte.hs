@@ -292,3 +292,25 @@ runProgram (Program defList) = do
     mapM_ declareFun defList
     mapM_ (preserveState . defineFun) defList
 
+
+runText :: String -> IO String
+runText s = let ts = myLexer s in case pProgram ts of
+    Bad s -> do hPutStrLn stderr "\nParse              Failed...\n"
+                hPutStrLn stderr s
+                exitFailure
+    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void) (runProgram tree) of
+        Right ((), writ) -> return $ "All is OK"
+        Left errMessage -> do hPutStr stderr errMessage
+                              exitFailure
+
+
+main :: IO ()
+main = do
+    args <- getArgs
+    case args of
+        [s] -> do
+            code <- readFile s
+            runText code
+            return ()
+        _ -> hPutStrLn stderr  "Only one argument!"
+
