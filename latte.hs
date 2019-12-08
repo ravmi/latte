@@ -34,6 +34,7 @@ data ProgState = ProgState { memory :: Memory
                  , blockStart :: Location
                  , freeLocation :: Location
                  , expectRetType :: Type
+                 , caughtRetType :: (Type, Bool)
                  }
 
 type Eval ev = StateT ProgState (WriterT String (ExceptT String Identity)) ev
@@ -41,28 +42,33 @@ runEval mem ev = runIdentity $ runExceptT (runWriterT (evalStateT ev mem))
 
 putMemory :: Location -> Type -> Eval ()
 putMemory key val = do
-    ProgState memory locs bs fl ert <- get
-    put $ ProgState (Map.insert key val memory) locs bs fl ert
+    ProgState memory locs bs fl ert crt <- get
+    put $ ProgState (Map.insert key val memory) locs bs fl ert crt
 
 putLocations :: Ident -> Location -> Eval ()
 putLocations key val = do
-    ProgState memory locs bs fl ert <- get
-    put $ ProgState memory (Map.insert key val locs) bs fl ert
+    ProgState memory locs bs fl ert crt <- get
+    put $ ProgState memory (Map.insert key val locs) bs fl ert crt
 
 putBlockStart :: Location -> Eval ()
 putBlockStart new = do
-    ProgState memory locs bs fl ert <- get
-    put $ ProgState memory locs new fl ert
+    ProgState memory locs bs fl ert crt <- get
+    put $ ProgState memory locs new fl ert crt
 
 putFreeLocation :: Location -> Eval ()
 putFreeLocation new = do
-    ProgState memory locs bs fl ert <- get
-    put $ ProgState memory locs bs new ert
+    ProgState memory locs bs fl ert crt <- get
+    put $ ProgState memory locs bs new ert crt
 
 putExpectRetType :: Type -> Eval ()
 putExpectRetType new = do
-    ProgState memory locs bs fl ert <- get
-    put $ ProgState memory locs bs fl new
+    ProgState memory locs bs fl ert crt <- get
+    put $ ProgState memory locs bs fl new crt
+
+putCaughtRetType :: (Type, Bool) -> Eval ()
+putCaughtRetType new = do
+    ProgState memory locs bs fl ert crt <- get
+    put $ ProgState memory locs bs fl ert new
 
 -- this allows to run block without affecting environment outside of the block.
 preserveState :: Eval a -> Eval a
@@ -70,6 +76,15 @@ preserveState p = do
     s <- get
     x <- p
     put s
+    return x
+
+preserveStateNoCaught :: Eval a -> Eval a
+preserveStateNoCaught p = do
+    s1 <- get
+    x <- p
+    s2 <- get
+    put s1
+    putCaughtRetType (caughtRetType s2)
     return x
 
 varUninitialized :: Ident -> String
@@ -100,6 +115,12 @@ badTypes opName badTypes = errLog where
     why = "Wrong usage of " ++ opName
     used = "used types: " ++ (show badTypes)
     errLog = why ++ "; " ++ used
+
+badReturn :: Ident -> Type -> String
+badReturn (Ident funName) retType = errLog where
+    why = "Function `" ++ funName ++ "` doesn't return correct type in all possible runs"
+    expected = "expected type: " ++ (show retType)
+    errLog = why ++ "; " ++ expected
 
 repeatingArgs :: [Arg] -> String
 repeatingArgs arguments = errLog where
@@ -229,7 +250,7 @@ declareItem expectedType (Init varName expr) = do
 
 runStmt :: Stmt -> Eval ()
 runStmt Empty = return ()
-runStmt (BStmt block) = preserveState (runBlock block)
+runStmt (BStmt block) = preserveStateNoCaught (runBlock block)
 runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
 runStmt (Ass varName expr) = do
     expressionType <- deduceType expr
@@ -254,44 +275,56 @@ runStmt (Ret expr) = do
     expressionType <- deduceType expr
     expectedType <- gets expectRetType
     case expressionType == expectedType of
-        True -> return ()
+        True -> putCaughtRetType (expressionType, True)
         False -> throwError $ badTypesSuggestion "return statement" expectedType expressionType
 
 runStmt (VRet) = do
     expectedType <- gets expectRetType
     case expectedType == Void of
-        True -> return ()
+        True -> putCaughtRetType (Void, True)
         False -> throwError $ badTypesSuggestion "return statement" expectedType Void
 
 runStmt (Cond expr stmt) = do
     expressionType <- deduceType expr
+    retOld <- gets caughtRetType
     case expressionType == Bool of
-        True -> return ()
+        True -> runStmt stmt
         False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
-    runStmt stmt
+    putCaughtRetType retOld
 
 runStmt (CondElse expr stmt1 stmt2) = do
     expressionType <- deduceType expr
+    (retOld, oldWasCaught) <- gets caughtRetType
     case expressionType == Bool of
         True -> return ()
         False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
     runStmt stmt1
+    (ret1, wasCaught1) <- gets caughtRetType
     runStmt stmt2
+    (ret2, wasCaught2) <- gets caughtRetType
+    case oldWasCaught of
+        True -> putCaughtRetType (retOld, oldWasCaught)
+        False -> case wasCaught2 && wasCaught2 && (ret1 == ret2) of
+            True -> putCaughtRetType (ret1, True)
+            False -> putCaughtRetType (retOld, oldWasCaught)
 
 runStmt (While expr stmt) = do
     expressionType <- deduceType expr
+    (retOld, oldWasCaught) <- gets caughtRetType
     case expressionType == Bool of
         True -> return ()
         False -> throwError $ badTypesSuggestion "while statement" Bool expressionType
     runStmt stmt
+    (newRet, newWasCaught) <- gets caughtRetType
+    case oldWasCaught of
+        True -> putCaughtRetType (retOld, oldWasCaught)
+        False -> case newWasCaught of
+            True -> putCaughtRetType (newRet, newWasCaught)
+            False -> putCaughtRetType (retOld, oldWasCaught)
 
 runStmt (SExp expr) = do
     deduceType expr
     return ()
-
-runTopDef :: TopDef -> Eval ()
-runTopDef (FnDef retType funName arguments block) = do
-    putExpectRetType retType
 
 getArgNames :: [Arg] -> Eval [Ident]
 getArgNames arguments = do
@@ -321,6 +354,10 @@ defineFun (FnDef retType funName arguments block) = do
     putExpectRetType retType
     mapM_ (uncurry declare) (zip argNames argTypes)
     runBlock block
+    (caughtRet, _) <- gets caughtRetType
+    case caughtRet == retType of
+        True -> return ()
+        False -> throwError $ badReturn funName retType
 
 declareNativeFunctions :: Eval ()
 declareNativeFunctions = do
@@ -342,7 +379,7 @@ runText s = let ts = myLexer s in case pProgram ts of
     Bad s -> do hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
-    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void) (runProgram tree) of
+    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False)) (runProgram tree) of
         Right ((), writ) -> return $ "All is OK"
         Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
