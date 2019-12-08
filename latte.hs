@@ -85,21 +85,21 @@ badApply :: Ident -> [Type] -> [Type] -> String
 badApply (Ident funName) okTypes badTypes = errLog where
     why = "Wrong usage of function: `" ++ funName ++ "`"
     expected = "expected arguments: " ++ (show okTypes)
-    used = "used: " ++ (show badTypes)
+    used = "used types: " ++ (show badTypes)
     errLog = why ++ "; " ++ expected ++ "; " ++ used
 
 badTypesSuggestion :: (Show a, Show b) => String -> a -> b -> String
 badTypesSuggestion opName okTypes badTypes = errLog where
     why = "Wrong usage of " ++ opName
     expected = "expected type: " ++ (show okTypes)
-    used = "used: " ++ (show badTypes)
+    used = "used types: " ++ (show badTypes)
     errLog = why ++ "; " ++ expected ++ "; " ++ used
 
 badTypes :: (Show a) => String -> a -> String
 badTypes opName badTypes = errLog where
     why = "Wrong usage of " ++ opName
-    used = "used: " ++ (show badTypes)
-    errLog = why ++ "; " ++ "; " ++ used
+    used = "used types: " ++ (show badTypes)
+    errLog = why ++ "; " ++ used
 
 repeatingArgs :: [Arg] -> String
 repeatingArgs arguments = errLog where
