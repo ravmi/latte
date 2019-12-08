@@ -325,6 +325,9 @@ defineFun (FnDef retType funName arguments block) = do
 declareNativeFunctions :: Eval ()
 declareNativeFunctions = do
     declare (Ident "printInt") (Fun Void [Int])
+    declare (Ident "printString") (Fun Void [Str])
+    declare (Ident "readInt") (Fun Int [])
+    declare (Ident "readString") (Fun Str [])
 
 runProgram :: Program -> Eval ()
 runProgram (Program defList) = do
