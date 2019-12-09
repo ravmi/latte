@@ -309,15 +309,11 @@ runStmt (CondElse ELitFalse stmt1 stmt2) = do
 
 runStmt (CondElse expr stmt1 stmt2) = do
     expressionType <- deduceType expr
-    if expressionType /= Bool
-        then throwError $ badTypesSuggestion "condition statement" Bool expressionType
-        else return ()
+    when (expressionType /= Bool) (throwError $ badTypesSuggestion "condition statement" Bool expressionType)
     (_, oldWasCaught) <- gets caughtRetType
     (ret1, wasCaught1) <- catchRet $ runStmt stmt1
     (ret2, wasCaught2) <- catchRet $ runStmt stmt2
-    if (not oldWasCaught) && wasCaught1 && wasCaught2 && (ret1 == ret2)
-        then putCaughtRetType (ret1, True)
-        else return ()
+    when (not oldWasCaught && wasCaught1 && wasCaught2 && (ret1 == ret2)) (putCaughtRetType (ret1, True))
 
 runStmt (While expr stmt) = do
     expressionType <- deduceType expr
