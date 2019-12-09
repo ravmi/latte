@@ -155,9 +155,9 @@ deduceType (ELitFalse) = return Bool
 deduceType (EApp funName funArgs) = do
     Fun expectedRet expectedArgTypes  <- lookupType funName
     argTypes <- mapM deduceType funArgs
-    case argTypes == expectedArgTypes of
-        True -> return expectedRet
-        False -> throwError (badApply funName expectedArgTypes argTypes)
+    if argTypes /= expectedArgTypes
+        then throwError (badApply funName expectedArgTypes argTypes)
+        else return expectedRet
 
 deduceType (EString _) = return Str
 deduceType (Neg expr) = do
@@ -175,9 +175,9 @@ deduceType (Not expr) = do
 deduceType (EMul e1 _ e2) = do
     ev1 <- deduceType e1
     ev2 <- deduceType e2
-    case ev1 == Int && ev2 == Int of
-        True -> return $ ev1
-        False -> throwError $ badTypesSuggestion "`*`" [Int, Int] [ev1, ev2]
+    if ev1 /= Int || ev2 /= Int
+        then throwError $ badTypesSuggestion "`*`" [Int, Int] [ev1, ev2]
+        else return $ ev1
 
 deduceType (EAdd exp1 Plus exp2) = do
     ev1 <- deduceType exp1
@@ -315,9 +315,9 @@ runStmt (CondElse ELitFalse stmt1 stmt2) = do
 
 runStmt (CondElse expr stmt1 stmt2) = do
     expressionType <- deduceType expr
-    case expressionType == Bool of
-        True -> return ()
-        False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
+    if expressionType /= Bool
+        then throwError $ badTypesSuggestion "condition statement" Bool expressionType
+        else return ()
     (_, oldWasCaught) <- gets caughtRetType
     (ret1, wasCaught1) <- catchRet $ runStmt stmt1
     (ret2, wasCaught2) <- catchRet $ runStmt stmt2
@@ -327,9 +327,9 @@ runStmt (CondElse expr stmt1 stmt2) = do
 
 runStmt (While expr stmt) = do
     expressionType <- deduceType expr
-    case expressionType == Bool of
-        True -> return ()
-        False -> throwError $ badTypesSuggestion "while statement" Bool expressionType
+    if expressionType /= Bool
+        then throwError $ badTypesSuggestion "while statement" Bool expressionType
+        else return ()
     (retOld, oldWasCaught) <- gets caughtRetType
     (newRet, newWasCaught) <- catchRet $ runStmt stmt
     if (not oldWasCaught) && newWasCaught
@@ -345,9 +345,9 @@ getArgNames arguments = do
     let
         getName (Arg _ argName) = argName
         argNames = map getName arguments in
-        case (length (nub argNames)) == (length argNames) of
-            True -> return argNames
-            False -> throwError $ repeatingArgs arguments
+        if (length (nub argNames)) /= (length argNames)
+            then throwError $ repeatingArgs arguments
+            else return argNames
 
 getArgTypes :: [Arg] -> Eval [Type]
 getArgTypes arguments = do
@@ -368,9 +368,9 @@ defineFun (FnDef retType funName arguments block) = do
     putExpectRetType retType
     mapM_ (uncurry declare) (zip argNames argTypes)
     (caughtRet, _) <- catchRet $ runBlock block
-    case caughtRet == retType of
-        True -> return ()
-        False -> throwError $ badReturn funName retType
+    if caughtRet /= retType
+        then throwError $ badReturn funName retType
+        else return ()
 
 declareNativeFunctions :: Eval ()
 declareNativeFunctions = do
