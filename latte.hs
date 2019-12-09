@@ -78,14 +78,13 @@ preserveState p = do
     put s
     return x
 
-preserveStateNoCaught :: Eval a -> Eval a
-preserveStateNoCaught p = do
-    s1 <- get
-    x <- p
-    s2 <- get
-    put s1
-    putCaughtRetType (caughtRetType s2)
-    return x
+catchRet :: Eval a -> Eval (Type, Bool)
+catchRet ev = do
+    oldRet <- gets caughtRetType
+    ev
+    newRet <- gets caughtRetType
+    putCaughtRetType oldRet
+    return newRet
 
 varUninitialized :: Ident -> String
 varUninitialized (Ident varName) = "`" ++ varName ++  "`" ++ " uninitialized"
@@ -250,7 +249,11 @@ declareItem expectedType (Init varName expr) = do
 
 runStmt :: Stmt -> Eval ()
 runStmt Empty = return ()
-runStmt (BStmt block) = preserveStateNoCaught (runBlock block)
+
+runStmt (BStmt block) = do
+    ret <- preserveState $ catchRet (runBlock block)
+    putCaughtRetType ret
+
 runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
 runStmt (Ass varName expr) = do
     expressionType <- deduceType expr
@@ -292,60 +295,46 @@ runStmt (VRet) = do
 
 runStmt (Cond ELitTrue stmt) = runStmt stmt
 
-runStmt (Cond ELitFalse stmt) = do
-    retOld <- gets caughtRetType
-    runStmt stmt
-    putCaughtRetType retOld
+runStmt (Cond ELitFalse stmt) = catchRet (runStmt stmt) >> return ()
 
 runStmt (Cond expr stmt) = do
     expressionType <- deduceType expr
-    retOld <- gets caughtRetType
     case expressionType == Bool of
-        True -> runStmt stmt
+        True -> catchRet $ runStmt stmt
         False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
-    putCaughtRetType retOld
+    return ()
 
 runStmt (CondElse ELitTrue stmt1 stmt2) = do
-    runStmt stmt1
-    retOld <- gets caughtRetType
+    retOld <- catchRet $ runStmt stmt1
     runStmt stmt2
     putCaughtRetType retOld
 
 runStmt (CondElse ELitFalse stmt1 stmt2) = do
-    retOld <- gets caughtRetType
-    runStmt stmt1
-    putCaughtRetType retOld
+    catchRet $ runStmt stmt1
     runStmt stmt2
 
 runStmt (CondElse expr stmt1 stmt2) = do
     expressionType <- deduceType expr
-    (retOld, oldWasCaught) <- gets caughtRetType
     case expressionType == Bool of
         True -> return ()
         False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
-    runStmt stmt1
-    (ret1, wasCaught1) <- gets caughtRetType
-    runStmt stmt2
-    (ret2, wasCaught2) <- gets caughtRetType
-    case oldWasCaught of
-        True -> putCaughtRetType (retOld, oldWasCaught)
-        False -> case wasCaught2 && wasCaught2 && (ret1 == ret2) of
-            True -> putCaughtRetType (ret1, True)
-            False -> putCaughtRetType (retOld, oldWasCaught)
+    (_, oldWasCaught) <- gets caughtRetType
+    (ret1, wasCaught1) <- catchRet $ runStmt stmt1
+    (ret2, wasCaught2) <- catchRet $ runStmt stmt2
+    if (not oldWasCaught) && wasCaught1 && wasCaught2 && (ret1 == ret2)
+        then putCaughtRetType (ret1, True)
+        else return ()
 
 runStmt (While expr stmt) = do
     expressionType <- deduceType expr
-    (retOld, oldWasCaught) <- gets caughtRetType
     case expressionType == Bool of
         True -> return ()
         False -> throwError $ badTypesSuggestion "while statement" Bool expressionType
-    runStmt stmt
-    (newRet, newWasCaught) <- gets caughtRetType
-    case oldWasCaught of
-        True -> putCaughtRetType (retOld, oldWasCaught)
-        False -> case newWasCaught of
-            True -> putCaughtRetType (newRet, newWasCaught)
-            False -> putCaughtRetType (retOld, oldWasCaught)
+    (retOld, oldWasCaught) <- gets caughtRetType
+    (newRet, newWasCaught) <- catchRet $ runStmt stmt
+    if (not oldWasCaught) && newWasCaught
+        then putCaughtRetType (newRet, True)
+        else return ()
 
 runStmt (SExp expr) = do
     deduceType expr
@@ -378,8 +367,7 @@ defineFun (FnDef retType funName arguments block) = do
     argTypes <- getArgTypes arguments
     putExpectRetType retType
     mapM_ (uncurry declare) (zip argNames argTypes)
-    runBlock block
-    (caughtRet, _) <- gets caughtRetType
+    (caughtRet, _) <- catchRet $ runBlock block
     case caughtRet == retType of
         True -> return ()
         False -> throwError $ badReturn funName retType
