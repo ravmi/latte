@@ -277,21 +277,15 @@ runStmt (Decr varName) = do
 runStmt (Ret expr) = do
     expressionType <- deduceType expr
     expectedType <- gets expectRetType
-    (retOld, wasCaught) <- gets caughtRetType
     if expressionType /= expectedType
         then throwError $ badTypesSuggestion "return statement" expectedType expressionType
-        else if not wasCaught
-            then putCaughtRetType (expressionType, True)
-            else return ()
+        else putCaughtRetType (expressionType, True)
 
 runStmt (VRet) = do
     expectedType <- gets expectRetType
-    (retOld, wasCaught) <- gets caughtRetType
     if expectedType /= Void
         then throwError $ badTypesSuggestion "return statement" expectedType Void
-        else if not wasCaught
-            then putCaughtRetType (Void, True)
-            else return ()
+        else putCaughtRetType (Void, True)
 
 runStmt (Cond ELitTrue stmt) = runStmt stmt
 
