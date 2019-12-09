@@ -290,6 +290,13 @@ runStmt (VRet) = do
             False -> putCaughtRetType (Void, True)
         False -> throwError $ badTypesSuggestion "return statement" expectedType Void
 
+runStmt (Cond ELitTrue stmt) = runStmt stmt
+
+runStmt (Cond ELitFalse stmt) = do
+    retOld <- gets caughtRetType
+    runStmt stmt
+    putCaughtRetType retOld
+
 runStmt (Cond expr stmt) = do
     expressionType <- deduceType expr
     retOld <- gets caughtRetType
@@ -297,6 +304,18 @@ runStmt (Cond expr stmt) = do
         True -> runStmt stmt
         False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
     putCaughtRetType retOld
+
+runStmt (CondElse ELitTrue stmt1 stmt2) = do
+    runStmt stmt1
+    retOld <- gets caughtRetType
+    runStmt stmt2
+    putCaughtRetType retOld
+
+runStmt (CondElse ELitFalse stmt1 stmt2) = do
+    retOld <- gets caughtRetType
+    runStmt stmt1
+    putCaughtRetType retOld
+    runStmt stmt2
 
 runStmt (CondElse expr stmt1 stmt2) = do
     expressionType <- deduceType expr
