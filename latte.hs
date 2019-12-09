@@ -182,44 +182,44 @@ deduceType (EMul e1 _ e2) = do
 deduceType (EAdd exp1 Plus exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    case ev1 == ev2 && (ev1 == Str || ev1 == Int) of
-        True -> return ev1
-        False -> throwError $ badTypes "`+`" [ev1, ev2]
+    if ev1 /= ev2 || (ev1 /= Str && ev1 /= Int)
+        then throwError $ badTypes "`+`" [ev1, ev2]
+        else return ev1
 
 deduceType (EAdd exp1 _ exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    case ev1 == Int && ev2 == Int of
-        True -> return $ ev1
-        False -> throwError $ badTypes "`+`" [ev1, ev2]
+    if ev1 /= Int || ev2 /= Int
+        then throwError $ badTypes "`+`" [ev1, ev2]
+        else return $ ev1
 
 deduceType (ERel exp1 EQU exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    case (ev1 == ev2) && (ev1 == Int || ev1 == Str || ev1 == Bool) of
-        True -> return Bool
-        False -> throwError $ badTypes "`==`" [ev1, ev2]
+    if (ev1 /= ev2) || (ev1 /= Int && ev1 /= Str && ev1 /= Bool)
+        then throwError $ badTypes "`==`" [ev1, ev2]
+        else return Bool
 
 deduceType (ERel exp1 _ exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    case ev1 == Int && ev2 == Int of
-        True -> return Bool
-        False -> throwError $ badTypesSuggestion "comparison operator" [Int, Int] [ev1, ev2]
+    if ev1 /= Int || ev2 /= Int
+        then throwError $ badTypesSuggestion "comparison operator" [Int, Int] [ev1, ev2]
+        else return Bool
 
 deduceType (EAnd exp1 exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    case ev1 == Bool && ev2 == Bool of
-        True -> return $ ev1
-        False -> throwError $ badTypesSuggestion "&&" [Bool, Bool] [ev1, ev2]
+    if ev1 /= Bool || ev2 /= Bool
+        then throwError $ badTypesSuggestion "&&" [Bool, Bool] [ev1, ev2]
+        else return $ ev1
 
 deduceType (EOr exp1 exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    case ev1 == Bool && ev2 == Bool of
-        True -> return $ ev1
-        False -> throwError $ badTypesSuggestion "||" [Bool, Bool] [ev1, ev2]
+    if ev1 /= Bool || ev2 /= Bool
+        then throwError $ badTypesSuggestion "||" [Bool, Bool] [ev1, ev2]
+        else return $ ev1
 
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
@@ -232,9 +232,9 @@ declare varName varType = do
     locs <- gets locations
     startLoc <- gets blockStart
     case Map.lookup varName locs of
-        Just location -> case location < startLoc of
-            True -> allocateVar varName varType
-            False -> throwError $ alreadyDeclared varName
+        Just location -> if location >= startLoc
+            then throwError $ alreadyDeclared varName
+            else allocateVar varName varType
         _ -> allocateVar varName varType
 
 declareItem :: Type -> Item -> Eval ()
@@ -243,9 +243,9 @@ declareItem expectedType (NoInit varName) = do
 
 declareItem expectedType (Init varName expr) = do
     expressionType <- deduceType expr
-    case expressionType == expectedType of
-        True -> declare varName expressionType
-        False -> throwError $ badTypesSuggestion "assignment" expectedType expressionType
+    if expressionType /= expectedType
+        then throwError $ badTypesSuggestion "assignment" expectedType expressionType
+        else declare varName expressionType
 
 runStmt :: Stmt -> Eval ()
 runStmt Empty = return ()
@@ -258,40 +258,40 @@ runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
 runStmt (Ass varName expr) = do
     expressionType <- deduceType expr
     varType <- deduceType (EVar varName)
-    case expressionType == varType of
-        True -> return ()
-        False -> throwError $ badTypesSuggestion "assignment" varType expressionType
+    if expressionType /= varType
+        then throwError $ badTypesSuggestion "assignment" varType expressionType
+        else return ()
 
 runStmt (Incr varName) = do
     varType <- deduceType (EVar varName)
-    case varType == Int of
-        True -> return ()
-        False -> throwError $ badTypesSuggestion "++" Int varType
+    if varType /= Int
+        then throwError $ badTypesSuggestion "++" Int varType
+        else return ()
 
 runStmt (Decr varName) = do
     varType <- deduceType (EVar varName)
-    case varType == Int of
-        True -> return ()
-        False -> throwError $ badTypesSuggestion "--" Int varType
+    if varType /= Int
+        then throwError $ badTypesSuggestion "--" Int varType
+        else return ()
 
 runStmt (Ret expr) = do
     expressionType <- deduceType expr
     expectedType <- gets expectRetType
     (retOld, wasCaught) <- gets caughtRetType
-    case expressionType == expectedType of
-        True -> case wasCaught of
-            True -> return ()
-            False -> putCaughtRetType (expressionType, True)
-        False -> throwError $ badTypesSuggestion "return statement" expectedType expressionType
+    if expressionType /= expectedType
+        then throwError $ badTypesSuggestion "return statement" expectedType expressionType
+        else if not wasCaught
+            then putCaughtRetType (expressionType, True)
+            else return ()
 
 runStmt (VRet) = do
     expectedType <- gets expectRetType
     (retOld, wasCaught) <- gets caughtRetType
-    case expectedType == Void of
-        True -> case wasCaught of
-            True -> return ()
-            False -> putCaughtRetType (Void, True)
-        False -> throwError $ badTypesSuggestion "return statement" expectedType Void
+    if expectedType /= Void
+        then throwError $ badTypesSuggestion "return statement" expectedType Void
+        else if not wasCaught
+            then putCaughtRetType (Void, True)
+            else return ()
 
 runStmt (Cond ELitTrue stmt) = runStmt stmt
 
@@ -299,9 +299,9 @@ runStmt (Cond ELitFalse stmt) = catchRet (runStmt stmt) >> return ()
 
 runStmt (Cond expr stmt) = do
     expressionType <- deduceType expr
-    case expressionType == Bool of
-        True -> catchRet $ runStmt stmt
-        False -> throwError $ badTypesSuggestion "condition statement" Bool expressionType
+    if expressionType /= Bool
+        then throwError $ badTypesSuggestion "condition statement" Bool expressionType
+        else catchRet $ runStmt stmt
     return ()
 
 runStmt (CondElse ELitTrue stmt1 stmt2) = do
