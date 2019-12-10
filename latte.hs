@@ -175,16 +175,16 @@ deduceType (Not expr) = do
 deduceType (EMul e1 _ e2) = do
     ev1 <- deduceType e1
     ev2 <- deduceType e2
-    if ev1 /= Int || ev2 /= Int
-        then throwError $ badTypesSuggestion "`*`" [Int, Int] [ev1, ev2]
-        else return $ ev1
+    when (ev1 /= Int || ev2 /= Int)
+        (throwError $ badTypesSuggestion "`*`" [Int, Int] [ev1, ev2])
+    return ev1
 
 deduceType (EAdd exp1 Plus exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    if ev1 /= ev2 || (ev1 /= Str && ev1 /= Int)
-        then throwError $ badTypes "`+`" [ev1, ev2]
-        else return ev1
+    when(ev1 /= ev2 || (ev1 /= Str && ev1 /= Int))
+        (throwError $ badTypes "`+`" [ev1, ev2])
+    return ev1
 
 deduceType (EAdd exp1 _ exp2) = do
     ev1 <- deduceType exp1
@@ -217,9 +217,9 @@ deduceType (EAnd exp1 exp2) = do
 deduceType (EOr exp1 exp2) = do
     ev1 <- deduceType exp1
     ev2 <- deduceType exp2
-    if ev1 /= Bool || ev2 /= Bool
-        then throwError $ badTypesSuggestion "||" [Bool, Bool] [ev1, ev2]
-        else return $ ev1
+    when (ev1 /= Bool || ev2 /= Bool)
+        (throwError $ badTypesSuggestion "||" [Bool, Bool] [ev1, ev2])
+    return ev1
 
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
@@ -243,9 +243,9 @@ declareItem expectedType (NoInit varName) = do
 
 declareItem expectedType (Init varName expr) = do
     expressionType <- deduceType expr
-    if expressionType /= expectedType
-        then throwError $ badTypesSuggestion "assignment" expectedType expressionType
-        else declare varName expressionType
+    when (expressionType /= expectedType)
+        (throwError $ badTypesSuggestion "assignment" expectedType expressionType)
+    declare varName expressionType
 
 runStmt :: Stmt -> Eval ()
 runStmt Empty = return ()
@@ -258,21 +258,18 @@ runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
 runStmt (Ass varName expr) = do
     expressionType <- deduceType expr
     varType <- deduceType (EVar varName)
-    if expressionType /= varType
-        then throwError $ badTypesSuggestion "assignment" varType expressionType
-        else return ()
+    when (expressionType /= varType)
+        (throwError $ badTypesSuggestion "assignment" varType expressionType)
 
 runStmt (Incr varName) = do
     varType <- deduceType (EVar varName)
-    if varType /= Int
-        then throwError $ badTypesSuggestion "++" Int varType
-        else return ()
+    when (varType /= Int)
+        (throwError $ badTypesSuggestion "++" Int varType)
 
 runStmt (Decr varName) = do
     varType <- deduceType (EVar varName)
-    if varType /= Int
-        then throwError $ badTypesSuggestion "--" Int varType
-        else return ()
+    when (varType /= Int)
+        (throwError $ badTypesSuggestion "--" Int varType)
 
 runStmt (Ret expr) = do
     expressionType <- deduceType expr
@@ -293,9 +290,9 @@ runStmt (Cond ELitFalse stmt) = catchRet (runStmt stmt) >> return ()
 
 runStmt (Cond expr stmt) = do
     expressionType <- deduceType expr
-    if expressionType /= Bool
-        then throwError $ badTypesSuggestion "condition statement" Bool expressionType
-        else catchRet $ runStmt stmt
+    when (expressionType /= Bool)
+        (throwError $ badTypesSuggestion "condition statement" Bool expressionType)
+    catchRet $ runStmt stmt
     return ()
 
 runStmt (CondElse ELitTrue stmt1 stmt2) = do
@@ -309,22 +306,22 @@ runStmt (CondElse ELitFalse stmt1 stmt2) = do
 
 runStmt (CondElse expr stmt1 stmt2) = do
     expressionType <- deduceType expr
-    when (expressionType /= Bool) (throwError $ badTypesSuggestion "condition statement" Bool expressionType)
+    when (expressionType /= Bool)
+        (throwError $ badTypesSuggestion "condition statement" Bool expressionType)
     (_, oldWasCaught) <- gets caughtRetType
     (ret1, wasCaught1) <- catchRet $ runStmt stmt1
     (ret2, wasCaught2) <- catchRet $ runStmt stmt2
-    when (not oldWasCaught && wasCaught1 && wasCaught2 && (ret1 == ret2)) (putCaughtRetType (ret1, True))
+    when (not oldWasCaught && wasCaught1 && wasCaught2 && (ret1 == ret2))
+        (putCaughtRetType (ret1, True))
 
 runStmt (While expr stmt) = do
     expressionType <- deduceType expr
-    if expressionType /= Bool
-        then throwError $ badTypesSuggestion "while statement" Bool expressionType
-        else return ()
+    when (expressionType /= Bool)
+        (throwError $ badTypesSuggestion "while statement" Bool expressionType)
     (retOld, oldWasCaught) <- gets caughtRetType
     (newRet, newWasCaught) <- catchRet $ runStmt stmt
-    if (not oldWasCaught) && newWasCaught
-        then putCaughtRetType (newRet, True)
-        else return ()
+    when ((not oldWasCaught) && newWasCaught)
+        (putCaughtRetType (newRet, True))
 
 runStmt (SExp expr) = do
     deduceType expr
