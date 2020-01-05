@@ -1,0 +1,8 @@
+int q () {
+    int c = 2 * a;
+    return c;
+}
+int main () {
+    int a = 12;
+    return q();
+}

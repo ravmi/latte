@@ -1,0 +1,8 @@
+int main() {
+    int a = 12;
+    if (4) {
+        return 4;
+    } else {
+        return 4;
+    }
+}
