@@ -44,10 +44,11 @@ data ProgState = ProgState { memory :: Memory
                  , freeLocation :: Location
                  , expectRetType :: Type
                  , caughtRetType :: (Type, Bool)
-                 , freeRegister :: Location
+                 , freeRegisters :: [Register]
                  , code :: QCode
                  , freeLabel :: Integer
                  }
+                 deriving (Eq, Ord, Show, Read)
 mkLabels [''ProgState]
 
 type Eval ev = StateT ProgState (WriterT String (ExceptT String Identity)) ev
@@ -58,16 +59,38 @@ emit q = do
     ProgState memory locs bs fl ert crt fr cd flab <- get
     put $ ProgState memory locs bs fl ert crt fr (cd ++ [q]) flab
 
-newReg :: Eval (Register)
-newReg = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory locs bs fl ert crt (fr + 1) cd flab
-    return $ Reg fr
+--example = ProgState Map.empty Map.empty 0 0 Void (Void, False) 0 [] 0
+
+--newReg :: Eval (Register)
+--newReg = do
+--    ProgState memory locs bs fl ert crt fr cd flab <- get
+--    put $ ProgState memory locs bs fl ert crt (fr + 1) cd flab
+--    return $ Reg fr
+
+getRegister :: Eval (Register)
+getRegister = do
+    ProgState memory locs bs fl ert crt freeRegisters cd flab <- get
+    freeReg <- return $ head freeRegisters
+    put $ ProgState memory locs bs fl ert crt (tail freeRegisters) cd flab
+    return $ freeReg
+
+
+putRegister :: Register -> Eval ()
+putRegister reg = do
+    ProgState memory locs bs fl ert crt freeRegisters cd flab <- get
+    case reg of
+        Reg1 -> put $ ProgState memory locs bs fl ert crt (Reg1:freeRegisters) cd flab
+        Reg2 -> put $ ProgState memory locs bs fl ert crt (Reg2:freeRegisters) cd flab
+        Reg3 -> put $ ProgState memory locs bs fl ert crt (Reg3:freeRegisters) cd flab
+        _ -> return ()
+
+
+
 
 newLabel :: Eval (Quadruple, Integer)
 newLabel = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory locs bs fl ert crt fr cd (flab + 1)
+    flab <- gets freeLabel
+    --update freeLabel (flab+1)
     return $ (QLab (Ident ("L" ++ (show flab))), flab)
 
 makeLabelN :: Integer -> Eval Ident
@@ -78,33 +101,33 @@ makeLabelQ :: Integer -> Eval Quadruple
 makeLabelQ i = do
     return $ QLab (Ident ("L" ++ (show i)))
 
-putMemory :: Location -> (Register, Type) -> Eval ()
-putMemory key val = do
+insertMemory :: Location -> (Register, Type) -> Eval ()
+insertMemory key val = do
     ProgState memory locs bs fl ert crt fr cd flab <- get
     put $ ProgState (Map.insert key val memory) locs bs fl ert crt fr cd flab
 
-putLocations :: Ident -> Location -> Eval ()
-putLocations key val = do
+insertLocations :: Ident -> Location -> Eval ()
+insertLocations key val = do
     ProgState memory locs bs fl ert crt fr cd flab <- get
     put $ ProgState memory (Map.insert key val locs) bs fl ert crt fr cd flab
 
-putBlockStart :: Location -> Eval ()
-putBlockStart new = do
+updateBlockStart :: Location -> Eval ()
+updateBlockStart new = do
     ProgState memory locs bs fl ert crt fr cd flab <- get
     put $ ProgState memory locs new fl ert crt fr cd flab
 
-putFreeLocation :: Location -> Eval ()
-putFreeLocation new = do
+updateFreeLocation :: Location -> Eval ()
+updateFreeLocation new = do
     ProgState memory locs bs fl ert crt fr cd flab <- get
     put $ ProgState memory locs bs new ert crt fr cd flab
 
-putExpectRetType :: Type -> Eval ()
-putExpectRetType new = do
+updateExpectRetType :: Type -> Eval ()
+updateExpectRetType new = do
     ProgState memory locs bs fl ert crt fr cd flab <- get
     put $ ProgState memory locs bs fl new crt fr cd flab
 
-putCaughtRetType :: (Type, Bool) -> Eval ()
-putCaughtRetType new = do
+updateCaughtRetType :: (Type, Bool) -> Eval ()
+updateCaughtRetType new = do
     ProgState memory locs bs fl ert crt fr cd flab <- get
     put $ ProgState memory locs bs fl ert new fr cd flab
 
@@ -137,7 +160,7 @@ catchRet ev = do
     oldRet <- gets caughtRetType
     ev
     newRet <- gets caughtRetType
-    putCaughtRetType oldRet
+    updateCaughtRetType oldRet
     return newRet
 
 varUninitialized :: Ident -> String
@@ -186,9 +209,9 @@ allocateVar :: Ident -> Type -> Eval Integer
 allocateVar varName varType = do
     freeLoc <- gets freeLocation
     locs <- gets locations
-    putMemory freeLoc (Mem freeLoc, varType)
-    putLocations varName freeLoc
-    putFreeLocation $ freeLoc + 1
+    insertMemory freeLoc (Mem freeLoc, varType)
+    insertLocations varName freeLoc
+    updateFreeLocation $ freeLoc + 1
     return freeLoc
 
 lookupName :: Ident -> Eval (Register, Type)
@@ -209,6 +232,19 @@ getLoc name = do
         Just location -> return $ Mem location
         _ -> throwError $ varUninitialized name
 
+copyToRegister :: Register -> Eval Register
+copyToRegister pos = do
+    freeReg <- getRegister
+    case pos of
+        Mem i -> do emit $ QMov pos freeReg
+                    return freeReg
+        RegInt i ->  do emit $ QMov pos freeReg
+                        return freeReg
+        RegBool b -> do emit $ QMov pos freeReg
+                        return freeReg
+        _ -> do putRegister freeReg
+                return pos
+
 dedType :: Expr -> Eval Type
 dedType expr = do
     (r, t) <- deduceType expr
@@ -227,8 +263,9 @@ deduceType (EApp funName funArgs) = do
     emit $ QFunc funName
     return (Mem 0, expectedRet)
 
+
 deduceType (EString str) = do
-    nReg <- newReg
+    nReg <- getRegister
     emit $ QString nReg str
     return $ (nReg, Str)
 
@@ -236,63 +273,66 @@ deduceType (Neg expr) = do
     (r, t) <- deduceType expr
     when (t /= Bool)
         (throwError $ badTypesSuggestion "`-`" Int t)
-    r2 <- newReg
-    emit $ QNeg r r2
-    return (r2, Int)
+    emit $ QNeg r
+    return (r, Int)
 
 deduceType (Not expr) = do
     (r, t) <- deduceType expr
     when (t /= Bool)
         (throwError $ badTypesSuggestion "`!`" Bool t)
-    r2 <- newReg
-    emit $ QNot r r2
-    return (r2, Bool)
+    emit $ QNot r
+    return (r, Bool)
 
 deduceType (EMul e1 op e2) = do
     (r1, t1) <- deduceType e1
     (r2, t2) <- deduceType e2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypesSuggestion "`*`" [Int, Int] [t1, t2])
-    r3 <- newReg
+    r2 <- copyToRegister r2
     case op of
-        Times -> emit $ QMul r1 r2 r3
-        Mod -> emit $ QMod r1 r2 r3
-        Div -> emit $ QDiv r1 r2 r3
-    return (r3, t1)
+        Times -> emit $ QMul r1 r2
+        Mod -> emit $ QMod r1 r2
+        Div -> emit $ QDiv r1 r2
+    putRegister r1
+    return (r2, t1)
 
 deduceType (EAdd exp1 Plus exp2) = do
     (r1, t1) <- deduceType exp1
     (r2, t2) <- deduceType exp2
+--    r2 <- copyToRegister r2
     when(t1 /= t2 || (t1 /= Str && t1 /= Int))
         (throwError $ badTypes "`+`" [t1, t2])
-    r3 <- newReg
-    emit $ QAdd r1 r2 r3
-    return (r3, t1)
+    r2 <- copyToRegister r2
+    emit $ QAdd r1 r2
+    putRegister r1
+    return (r2, t1)
 
 deduceType (EAdd exp1 Minus exp2) = do
     (r1, t1) <- deduceType exp1
     (r2, t2) <- deduceType exp2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypes "`+`" [t1, t2])
-    r3 <- newReg
-    emit $ QAdd r1 r2 r3
-    return (r3, t1)
+    r2 <- copyToRegister r2
+    emit $ QAdd r1 r2
+    putRegister r1
+    return (r2, t1)
 
 deduceType (ERel exp1 EQU exp2) = do
     (r1, t1) <- deduceType exp1
     (r2, t2) <- deduceType exp2
     when ((t1 /= t2) || (t1 /= Int && t1 /= Str && t1 /= Bool))
         (throwError $ badTypes "`==`" [t1, t2])
-    r3 <- newReg
+    r2 <- copyToRegister r2
     emit $ QCmpEq r1 r2
-    return (r3, Bool)
+    putRegister r1
+    return (r2, Bool)
 
 deduceType (ERel exp1 op exp2) = do
     (r1, t1) <- deduceType exp1
     (r2, t2) <- deduceType exp2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypesSuggestion "comparison operator" [Int, Int] [t1, t2])
-    r3 <- newReg
+    r2 <- copyToRegister r2
     case op of
         LTH -> emit $ QCmpLt r1 r2
         LE -> emit $ QCmpLe r1 r2
@@ -300,30 +340,33 @@ deduceType (ERel exp1 op exp2) = do
         GE -> emit $ QCmpGe r1 r2
         EQU -> emit $ QCmpEq r1 r2
         NE -> emit $ QCmpNe r1 r2
-    return (r3, Bool)
+    putRegister r1
+    return (r2, Bool)
 
 deduceType (EAnd exp1 exp2) = do
     (r1, t1) <- deduceType exp1
     (r2, t2) <- deduceType exp2
     when (t1 /= Bool || t2 /= Bool)
         (throwError $ badTypesSuggestion "&&" [Bool, Bool] [t1, t2])
-    r3 <- newReg
-    emit $ QAnd r1 r2 r3
-    return (r3, Bool)
+    r2 <- copyToRegister r2
+    emit $ QAnd r1 r2
+    putRegister r1
+    return (r2, Bool)
 
 deduceType (EOr exp1 exp2) = do
     (r1, t1) <- deduceType exp1
     (r2, t2) <- deduceType exp2
     when (t1 /= Bool || t2 /= Bool)
         (throwError $ badTypesSuggestion "||" [Bool, Bool] [t1, t2])
-    r3 <- newReg
-    emit $ QOr r1 r2 r3
-    return (r3, Bool)
+    r2 <- copyToRegister r2
+    emit $ QOr r1 r2
+    putRegister r1
+    return (r2, Bool)
 
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
     freeLoc <- gets freeLocation
-    putBlockStart freeLoc
+    updateBlockStart freeLoc
     mapM_ runStmt statements
 
 declare :: Ident -> Type -> Eval (Integer)
@@ -345,6 +388,7 @@ declareItem expectedType (Init varName expr) = do
     (r1, t1) <- deduceType expr
     when (t1 /= expectedType)
         (throwError $ badTypesSuggestion "assignment" expectedType t1)
+    r1 <- copyToRegister r1
     loc <- declare varName t1
     emit $ QAss r1 (Mem loc)
 
@@ -353,7 +397,7 @@ runStmt Empty = return ()
 
 runStmt (BStmt block) = do
     ret <- preserveState $ catchRet (runBlock block)
-    putCaughtRetType ret
+    updateCaughtRetType ret
 
 runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
 runStmt (Ass varName expr) = do
@@ -361,8 +405,8 @@ runStmt (Ass varName expr) = do
     (r2, t2) <- deduceType (EVar varName)
     when (t1 /= t2)
         (throwError $ badTypesSuggestion "assignment" t2 t1)
-    l1 <- getLoc varName
-    emit $ QAss r1 l1
+    r1 <- copyToRegister r1
+    emit $ QAss r1 r2
 
 
 runStmt (Incr varName) = do
@@ -384,14 +428,14 @@ runStmt (Ret expr) = do
     expectedType <- gets expectRetType
     when (t1 /= expectedType)
         (throwError $ badTypesSuggestion "return statement" expectedType t1)
-    putCaughtRetType (t1, True)
+    updateCaughtRetType (t1, True)
     emit $ QRet r1
 
 runStmt (VRet) = do
     expectedType <- gets expectRetType
     when (expectedType /= Void)
         (throwError $ badTypesSuggestion "return statement" expectedType Void)
-    putCaughtRetType (Void, True)
+    updateCaughtRetType (Void, True)
     emit $ QRetV
 
 runStmt (Cond ELitTrue stmt) = runStmt stmt
@@ -414,7 +458,7 @@ runStmt (Cond expr stmt) = do
 runStmt (CondElse ELitTrue stmt1 stmt2) = do
     retOld <- catchRet $ runStmt stmt1
     runStmt stmt2
-    putCaughtRetType retOld
+    updateCaughtRetType retOld
 
 runStmt (CondElse ELitFalse stmt1 stmt2) = do
     catchRet $ runStmt stmt1
@@ -439,7 +483,7 @@ runStmt (CondElse expr stmt1 stmt2) = do
     (ret2, wasCaught2) <- catchRet $ runStmt stmt2
     emit $ lab2
     when (not oldWasCaught && wasCaught1 && wasCaught2 && (ret1 == ret2))
-        (putCaughtRetType (ret1, True))
+        (updateCaughtRetType (ret1, True))
 
 runStmt (While expr stmt) = do
     (lab1, lname1) <- newLabel
@@ -457,7 +501,7 @@ runStmt (While expr stmt) = do
     (retOld, oldWasCaught) <- gets caughtRetType
     (newRet, newWasCaught) <- catchRet $ runStmt stmt
     when ((not oldWasCaught) && newWasCaught)
-        (putCaughtRetType (newRet, True))
+        (updateCaughtRetType (newRet, True))
     emit $ QJmp lName1
     emit lab2
 
@@ -500,7 +544,7 @@ defineFun :: TopDef -> Eval (QBlock)
 defineFun (FnDef retType funName arguments block) = do
     argNames <- getArgNames arguments
     argTypes <- getArgTypes arguments
-    putExpectRetType retType
+    updateExpectRetType retType
     mapM_ (uncurry declare) (zip argNames argTypes)
     (caughtRet, _) <- catchRet $ runBlock block
     when (caughtRet /= retType)
@@ -524,7 +568,7 @@ runProgram (Program defList) = do
     declareNativeFunctions
     mapM_ declareFun defList
     freeLoc <- gets freeLocation
-    putBlockStart freeLoc
+    updateBlockStart freeLoc
     clearMemory
     mapM (preserveState . defineFun) defList
 
@@ -533,7 +577,7 @@ runText s = let ts = myLexer s in case pProgram ts of
     Bad s -> do hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
-    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) 0 [] 0) (runProgram tree) of
+    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [Reg1, Reg2, Reg3] [] 0) (runProgram tree) of
         Right (code, w) -> return $ code
         Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
