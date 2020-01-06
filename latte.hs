@@ -31,7 +31,7 @@ import ImdLatte
 
 
 
-type Location = Integer
+type Location = Int
 -- describes where are the variables located
 type Locations = Map.Map Ident Location
 -- describes what memory looks like (only types for now)
@@ -171,7 +171,7 @@ catchRet ev = do
     updateCaughtRetType oldRet
     return newRet
 
-allocateVar :: Ident -> Type -> Eval Integer
+allocateVar :: Ident -> Type -> Eval Int
 allocateVar varName varType = do
     freeLoc <- lgets freeLocation
     locs <- lgets locations
@@ -359,7 +359,7 @@ runBlock (Block statements) = do
     updateBlockStart freeLoc
     mapM_ runStmt statements
 
-declare :: Ident -> Type -> Eval (Integer)
+declare :: Ident -> Type -> Eval (Int)
 declare varName varType = do
     locs <- lgets locations
     startLoc <- lgets blockStart
@@ -529,16 +529,29 @@ getArgTypes arguments = do
 
 declareFun :: TopDef -> Eval ()
 declareFun (FnDef retType funName arguments _) = do
+    funs <- lgets functions
     argTypes <- getArgTypes arguments
-    declare funName (Fun retType argTypes)
-    return ()
+    case Map.lookup funName funs of
+        Just t -> throwError $ alreadyDeclared funName
+        _ -> update functions (Map.insert funName (Fun retType argTypes) funs)
+
+modifyState :: ProgState :-> a -> Eval (b) -> Eval b
+modifyState getter ev = do
+    prevState <- get
+    ret <- ev
+    val <- lgets getter
+    put prevState
+    update getter val
+    return ret
 
 defineFun :: TopDef -> Eval (QBlock)
 defineFun (FnDef retType funName arguments block) = do
     argNames <- getArgNames arguments
     argTypes <- getArgTypes arguments
     updateExpectRetType retType
+    update freeLocation (negate (length argNames))
     mapM_ (uncurry declare) (zip argNames argTypes)
+    update freeLocation 0
     (caughtRet, _) <- catchRet $ runBlock block
     when (caughtRet /= retType)
         (throwError $ badReturn funName retType)
