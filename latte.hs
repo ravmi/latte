@@ -1,6 +1,8 @@
 {-# LANGUAGE TemplateHaskell, TypeOperators #-}
 module Main where
 
+import Asm32
+
 import Control.Category
 import Data.Label hiding (get)
 import Prelude hiding ((.), id)
@@ -596,6 +598,6 @@ main = do
         [s] -> do
             code <- readFile s
             ps <- runText code
-            print $ ps
+            putStrLn $ translateProgram ps
             return ()
         _ -> hPutStrLn stderr  "Only one argument!"
