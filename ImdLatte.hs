@@ -45,7 +45,8 @@ data Quadruple
     | QCmpNe Register Register
     | QFunc Ident
     | QDecl Register
-    | QString Register String
+    | QAlloc Register Int
+    | QConcat Register Register Register
     | QMov Register Register
     deriving (Eq, Ord, Show, Read)
 

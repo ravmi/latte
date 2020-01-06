@@ -1,10 +1,11 @@
-
 {-# LANGUAGE TemplateHaskell, TypeOperators #-}
 module Main where
 
 import Control.Category
 import Data.Label hiding (get)
 import Prelude hiding ((.), id)
+
+import LatteErrors
 
 import Control.Monad.Identity
 import Control.Monad.Except
@@ -16,6 +17,7 @@ import Data.List
 import Data.List.Split
 import qualified Data.Set as Set
 import qualified Data.Map as Map
+import qualified Data.Label as L
 import System.Environment ( getArgs, getProgName )
 import System.Exit ( exitFailure, exitSuccess )
 import System.IO
@@ -38,15 +40,16 @@ type Memory = Map.Map Location (Register, Type)
 -- in current state we want to keep locations of variables, state of the memory,
 -- current free avaliable memory location, location of beginning of the block
 -- and expected return type
-data ProgState = ProgState { memory :: Memory
-                 , locations :: Locations
-                 , blockStart :: Location
-                 , freeLocation :: Location
-                 , expectRetType :: Type
-                 , caughtRetType :: (Type, Bool)
-                 , freeRegisters :: [Register]
-                 , code :: QCode
-                 , freeLabel :: Integer
+data ProgState = ProgState { _memory :: Memory
+                 , _locations :: Locations
+                 , _blockStart :: Location
+                 , _freeLocation :: Location
+                 , _expectRetType :: Type
+                 , _caughtRetType :: (Type, Bool)
+                 , _freeRegisters :: [Register]
+                 , _code :: QCode
+                 , _freeLabel :: Integer
+                 , _functions :: Map.Map Ident Type
                  }
                  deriving (Eq, Ord, Show, Read)
 mkLabels [''ProgState]
@@ -56,8 +59,8 @@ runEval mem ev = runIdentity $ runExceptT (runWriterT (evalStateT ev mem))
 
 emit :: Quadruple -> Eval ()
 emit q = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory locs bs fl ert crt fr (cd ++ [q]) flab
+    ProgState memory locs bs fl ert crt fr cd flab funs <- get
+    put $ ProgState memory locs bs fl ert crt fr (cd ++ [q]) flab funs
 
 --example = ProgState Map.empty Map.empty 0 0 Void (Void, False) 0 [] 0
 
@@ -69,28 +72,32 @@ emit q = do
 
 getRegister :: Eval (Register)
 getRegister = do
-    ProgState memory locs bs fl ert crt freeRegisters cd flab <- get
+    ProgState memory locs bs fl ert crt freeRegisters cd flab funs <- get
     freeReg <- return $ head freeRegisters
-    put $ ProgState memory locs bs fl ert crt (tail freeRegisters) cd flab
+    put $ ProgState memory locs bs fl ert crt (tail freeRegisters) cd flab funs
     return $ freeReg
 
 
 putRegister :: Register -> Eval ()
 putRegister reg = do
-    ProgState memory locs bs fl ert crt freeRegisters cd flab <- get
+    freeRegs <- lgets freeRegisters
     case reg of
-        Reg1 -> put $ ProgState memory locs bs fl ert crt (Reg1:freeRegisters) cd flab
-        Reg2 -> put $ ProgState memory locs bs fl ert crt (Reg2:freeRegisters) cd flab
-        Reg3 -> put $ ProgState memory locs bs fl ert crt (Reg3:freeRegisters) cd flab
+        Reg1 -> update freeRegisters (Reg1:freeRegs)
+        Reg2 -> update freeRegisters (Reg2:freeRegs)
+        Reg3 -> update freeRegisters (Reg3:freeRegs)
         _ -> return ()
 
+update :: ProgState :-> a -> a -> Eval ()
+update fun val = do
+    state <- get
+    put $ set fun val state
 
-
+lgets :: MonadState f m => f :-> a -> m a
+lgets f = gets (L.get f)
 
 newLabel :: Eval (Quadruple, Integer)
 newLabel = do
-    flab <- gets freeLabel
-    --update freeLabel (flab+1)
+    flab <- lgets freeLabel
     return $ (QLab (Ident ("L" ++ (show flab))), flab)
 
 makeLabelN :: Integer -> Eval Ident
@@ -103,47 +110,48 @@ makeLabelQ i = do
 
 insertMemory :: Location -> (Register, Type) -> Eval ()
 insertMemory key val = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState (Map.insert key val memory) locs bs fl ert crt fr cd flab
+    mem <- lgets memory
+    update memory (Map.insert key val mem)
 
 insertLocations :: Ident -> Location -> Eval ()
 insertLocations key val = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory (Map.insert key val locs) bs fl ert crt fr cd flab
+    ProgState memory locs bs fl ert crt fr cd flab funs <- get
+    locs <- lgets locations
+    update locations (Map.insert key val locs)
 
 updateBlockStart :: Location -> Eval ()
 updateBlockStart new = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory locs new fl ert crt fr cd flab
+    ProgState memory locs bs fl ert crt fr cd flab funs <- get
+    put $ ProgState memory locs new fl ert crt fr cd flab funs
 
 updateFreeLocation :: Location -> Eval ()
 updateFreeLocation new = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory locs bs new ert crt fr cd flab
+    ProgState memory locs bs fl ert crt fr cd flab funs <- get
+    put $ ProgState memory locs bs new ert crt fr cd flab funs
 
 updateExpectRetType :: Type -> Eval ()
 updateExpectRetType new = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory locs bs fl new crt fr cd flab
+    ProgState memory locs bs fl ert crt fr cd flab funs <- get
+    put $ ProgState memory locs bs fl new crt fr cd flab funs
 
 updateCaughtRetType :: (Type, Bool) -> Eval ()
 updateCaughtRetType new = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory locs bs fl ert new fr cd flab
+    ProgState memory locs bs fl ert crt fr cd flab funs <- get
+    put $ ProgState memory locs bs fl ert new fr cd flab funs
 
 clearMemory :: Eval ()
 clearMemory = do
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState Map.empty Map.empty 0 0 ert crt fr cd flab
+    ProgState memory locs bs fl ert crt fr cd flab funs <- get
+    put $ ProgState Map.empty Map.empty 0 0 ert crt fr cd flab funs
 
 
 -- this allows to run block without affecting environment outside of the block.
 preserveState :: Eval a -> Eval a
 preserveState p = do
-    ProgState memory1 locs1 bs1 fl1 ert1 crt1 fr1 cd1 flab1 <- get
+    ProgState memory1 locs1 bs1 fl1 ert1 crt1 fr1 cd1 flab1 funs1 <- get
     x <- p
-    ProgState memory2 locs2 bs2 fl2 ert2 crt2 fr2 cd2 flab2 <- get
-    put $ ProgState memory1 locs1 bs1 fl1 ert1 crt1 fr1 cd2 flab2
+    ProgState memory2 locs2 bs2 fl2 ert2 crt2 fr2 cd2 flab2 funs2 <- get
+    put $ ProgState memory1 locs1 bs1 fl1 ert1 crt1 fr1 cd2 flab2 funs2
     return x
 
 --preserve :: Eval a -> (ProgState -> b) -> Eval a
@@ -157,58 +165,16 @@ preserveState p = do
 
 catchRet :: Eval a -> Eval (Type, Bool)
 catchRet ev = do
-    oldRet <- gets caughtRetType
+    oldRet <- lgets caughtRetType
     ev
-    newRet <- gets caughtRetType
+    newRet <- lgets caughtRetType
     updateCaughtRetType oldRet
     return newRet
 
-varUninitialized :: Ident -> String
-varUninitialized (Ident varName) = "`" ++ varName ++  "`" ++ " uninitialized"
-
-alreadyDeclared :: Ident -> String
-alreadyDeclared (Ident varName) = "`" ++ varName ++  "`" ++ " declared before in the same scope"
-
-unexpected :: String
-unexpected = "Something very bad happened"
-
-badApply :: Ident -> [Type] -> [Type] -> String
-badApply (Ident funName) okTypes badTypes = errLog where
-    why = "Wrong usage of function: `" ++ funName ++ "`"
-    expected = "expected arguments: " ++ (show okTypes)
-    used = "used types: " ++ (show badTypes)
-    errLog = why ++ "; " ++ expected ++ "; " ++ used
-
-badTypesSuggestion :: (Show a, Show b) => String -> a -> b -> String
-badTypesSuggestion opName okTypes badTypes = errLog where
-    why = "Wrong usage of " ++ opName
-    expected = "expected type: " ++ (show okTypes)
-    used = "used types: " ++ (show badTypes)
-    errLog = why ++ "; " ++ expected ++ "; " ++ used
-
-badTypes :: (Show a) => String -> a -> String
-badTypes opName badTypes = errLog where
-    why = "Wrong usage of " ++ opName
-    used = "used types: " ++ (show badTypes)
-    errLog = why ++ "; " ++ used
-
-badReturn :: Ident -> Type -> String
-badReturn (Ident funName) retType = errLog where
-    why = "Function `" ++ funName ++ "` doesn't return correct type in all possible runs"
-    expected = "expected type: " ++ (show retType)
-    errLog = why ++ "; " ++ expected
-
-repeatingArgs :: [Arg] -> String
-repeatingArgs arguments = errLog where
-    why = "Some of the argument names repeat"
-    showArg (Arg varType (Ident varName)) = show varType ++ " " ++ varName
-    argList = map showArg arguments
-    errLog = why ++ ": " ++ "[" ++ (intercalate ", " argList) ++ "]"
-
 allocateVar :: Ident -> Type -> Eval Integer
 allocateVar varName varType = do
-    freeLoc <- gets freeLocation
-    locs <- gets locations
+    freeLoc <- lgets freeLocation
+    locs <- lgets locations
     insertMemory freeLoc (Mem freeLoc, varType)
     insertLocations varName freeLoc
     updateFreeLocation $ freeLoc + 1
@@ -216,18 +182,25 @@ allocateVar varName varType = do
 
 lookupName :: Ident -> Eval (Register, Type)
 lookupName name = do
-    locs <- gets locations
-    mem <- gets memory
+    locs <- lgets locations
+    mem <- lgets memory
     case Map.lookup name locs of
         Just location -> case Map.lookup location mem of
             Just varInfo -> return varInfo
             _ -> throwError unexpected
         _ -> throwError $ varUninitialized name
 
+lookupFunction :: Ident -> Eval (Type)
+lookupFunction name = do
+    funs <- lgets functions
+    case Map.lookup name funs of
+        Just fun -> return fun
+        _ -> throwError $ varUninitialized name
+
 getLoc :: Ident -> Eval (Register)
 getLoc name = do
-    locs <- gets locations
-    mem <- gets memory
+    locs <- lgets locations
+    mem <- lgets memory
     case Map.lookup name locs of
         Just location -> return $ Mem location
         _ -> throwError $ varUninitialized name
@@ -247,15 +220,24 @@ copyToRegister pos = do
 
 dedType :: Expr -> Eval Type
 dedType expr = do
-    (r, t) <- deduceType expr
+    (r, t) <- translateExpression expr
     return t
 -- @TODO odzielna mapa na funkcja
-deduceType :: Expr -> Eval (Register, Type)
-deduceType (EVar name) = lookupName name
-deduceType (ELitInt i) = return (RegInt i, Int)
-deduceType (ELitTrue) = return (RegBool True, Bool)
-deduceType (ELitFalse) = return (RegBool False, Bool)
-deduceType (EApp funName funArgs) = do
+
+
+
+
+
+
+
+
+
+translateExpression :: Expr -> Eval (Register, Type)
+translateExpression (EVar name) = lookupName name
+translateExpression (ELitInt i) = return (RegInt i, Int)
+translateExpression (ELitTrue) = return (RegBool True, Bool)
+translateExpression (ELitFalse) = return (RegBool False, Bool)
+translateExpression (EApp funName funArgs) = do
     (hehe, Fun expectedRet expectedArgTypes)  <- lookupName funName
     argTypes <- mapM dedType funArgs
     when (argTypes /= expectedArgTypes)
@@ -263,29 +245,28 @@ deduceType (EApp funName funArgs) = do
     emit $ QFunc funName
     return (Mem 0, expectedRet)
 
-
-deduceType (EString str) = do
+translateExpression (EString str) = do
     nReg <- getRegister
-    emit $ QString nReg str
+    emit $ QAlloc nReg (length str)
     return $ (nReg, Str)
 
-deduceType (Neg expr) = do
-    (r, t) <- deduceType expr
+translateExpression (Neg expr) = do
+    (r, t) <- translateExpression expr
     when (t /= Bool)
         (throwError $ badTypesSuggestion "`-`" Int t)
     emit $ QNeg r
     return (r, Int)
 
-deduceType (Not expr) = do
-    (r, t) <- deduceType expr
+translateExpression (Not expr) = do
+    (r, t) <- translateExpression expr
     when (t /= Bool)
         (throwError $ badTypesSuggestion "`!`" Bool t)
     emit $ QNot r
     return (r, Bool)
 
-deduceType (EMul e1 op e2) = do
-    (r1, t1) <- deduceType e1
-    (r2, t2) <- deduceType e2
+translateExpression (EMul e1 op e2) = do
+    (r1, t1) <- translateExpression e1
+    (r2, t2) <- translateExpression e2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypesSuggestion "`*`" [Int, Int] [t1, t2])
     r2 <- copyToRegister r2
@@ -296,20 +277,25 @@ deduceType (EMul e1 op e2) = do
     putRegister r1
     return (r2, t1)
 
-deduceType (EAdd exp1 Plus exp2) = do
-    (r1, t1) <- deduceType exp1
-    (r2, t2) <- deduceType exp2
+translateExpression (EAdd exp1 Plus exp2) = do
+    (r1, t1) <- translateExpression exp1
+    (r2, t2) <- translateExpression exp2
 --    r2 <- copyToRegister r2
     when(t1 /= t2 || (t1 /= Str && t1 /= Int))
         (throwError $ badTypes "`+`" [t1, t2])
     r2 <- copyToRegister r2
-    emit $ QAdd r1 r2
-    putRegister r1
+    case t1 of
+        Int -> do emit $ QAdd r1 r2
+                  putRegister r1
+        Str -> do r3 <- getRegister
+                  emit $ QConcat r1 r2 r3
+                  putRegister r1
+                  putRegister r2
     return (r2, t1)
 
-deduceType (EAdd exp1 Minus exp2) = do
-    (r1, t1) <- deduceType exp1
-    (r2, t2) <- deduceType exp2
+translateExpression (EAdd exp1 Minus exp2) = do
+    (r1, t1) <- translateExpression exp1
+    (r2, t2) <- translateExpression exp2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypes "`+`" [t1, t2])
     r2 <- copyToRegister r2
@@ -317,9 +303,9 @@ deduceType (EAdd exp1 Minus exp2) = do
     putRegister r1
     return (r2, t1)
 
-deduceType (ERel exp1 EQU exp2) = do
-    (r1, t1) <- deduceType exp1
-    (r2, t2) <- deduceType exp2
+translateExpression (ERel exp1 EQU exp2) = do
+    (r1, t1) <- translateExpression exp1
+    (r2, t2) <- translateExpression exp2
     when ((t1 /= t2) || (t1 /= Int && t1 /= Str && t1 /= Bool))
         (throwError $ badTypes "`==`" [t1, t2])
     r2 <- copyToRegister r2
@@ -327,9 +313,9 @@ deduceType (ERel exp1 EQU exp2) = do
     putRegister r1
     return (r2, Bool)
 
-deduceType (ERel exp1 op exp2) = do
-    (r1, t1) <- deduceType exp1
-    (r2, t2) <- deduceType exp2
+translateExpression (ERel exp1 op exp2) = do
+    (r1, t1) <- translateExpression exp1
+    (r2, t2) <- translateExpression exp2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypesSuggestion "comparison operator" [Int, Int] [t1, t2])
     r2 <- copyToRegister r2
@@ -343,9 +329,9 @@ deduceType (ERel exp1 op exp2) = do
     putRegister r1
     return (r2, Bool)
 
-deduceType (EAnd exp1 exp2) = do
-    (r1, t1) <- deduceType exp1
-    (r2, t2) <- deduceType exp2
+translateExpression (EAnd exp1 exp2) = do
+    (r1, t1) <- translateExpression exp1
+    (r2, t2) <- translateExpression exp2
     when (t1 /= Bool || t2 /= Bool)
         (throwError $ badTypesSuggestion "&&" [Bool, Bool] [t1, t2])
     r2 <- copyToRegister r2
@@ -353,9 +339,9 @@ deduceType (EAnd exp1 exp2) = do
     putRegister r1
     return (r2, Bool)
 
-deduceType (EOr exp1 exp2) = do
-    (r1, t1) <- deduceType exp1
-    (r2, t2) <- deduceType exp2
+translateExpression (EOr exp1 exp2) = do
+    (r1, t1) <- translateExpression exp1
+    (r2, t2) <- translateExpression exp2
     when (t1 /= Bool || t2 /= Bool)
         (throwError $ badTypesSuggestion "||" [Bool, Bool] [t1, t2])
     r2 <- copyToRegister r2
@@ -363,16 +349,20 @@ deduceType (EOr exp1 exp2) = do
     putRegister r1
     return (r2, Bool)
 
+
+
+
+
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
-    freeLoc <- gets freeLocation
+    freeLoc <- lgets freeLocation
     updateBlockStart freeLoc
     mapM_ runStmt statements
 
 declare :: Ident -> Type -> Eval (Integer)
 declare varName varType = do
-    locs <- gets locations
-    startLoc <- gets blockStart
+    locs <- lgets locations
+    startLoc <- lgets blockStart
     case Map.lookup varName locs of
         Just location -> if (location >= startLoc)
             then throwError $ alreadyDeclared varName
@@ -385,7 +375,7 @@ declareItem expectedType (NoInit varName) = do
     return ()
 
 declareItem expectedType (Init varName expr) = do
-    (r1, t1) <- deduceType expr
+    (r1, t1) <- translateExpression expr
     when (t1 /= expectedType)
         (throwError $ badTypesSuggestion "assignment" expectedType t1)
     r1 <- copyToRegister r1
@@ -401,8 +391,8 @@ runStmt (BStmt block) = do
 
 runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
 runStmt (Ass varName expr) = do
-    (r1, t1) <- deduceType expr
-    (r2, t2) <- deduceType (EVar varName)
+    (r1, t1) <- translateExpression expr
+    (r2, t2) <- translateExpression (EVar varName)
     when (t1 /= t2)
         (throwError $ badTypesSuggestion "assignment" t2 t1)
     r1 <- copyToRegister r1
@@ -410,29 +400,29 @@ runStmt (Ass varName expr) = do
 
 
 runStmt (Incr varName) = do
-    (r1, t1) <- deduceType (EVar varName)
+    (r1, t1) <- translateExpression (EVar varName)
     when (t1 /= Int)
         (throwError $ badTypesSuggestion "++" Int t1)
     l1 <- getLoc varName
     emit $ QInc l1
 
 runStmt (Decr varName) = do
-    (r1, t1) <- deduceType (EVar varName)
+    (r1, t1) <- translateExpression (EVar varName)
     when (t1 /= Int)
         (throwError $ badTypesSuggestion "--" Int t1)
     l1 <- getLoc varName
     emit $ QDec l1
 
 runStmt (Ret expr) = do
-    (r1, t1) <- deduceType expr
-    expectedType <- gets expectRetType
+    (r1, t1) <- translateExpression expr
+    expectedType <- lgets expectRetType
     when (t1 /= expectedType)
         (throwError $ badTypesSuggestion "return statement" expectedType t1)
     updateCaughtRetType (t1, True)
     emit $ QRet r1
 
 runStmt (VRet) = do
-    expectedType <- gets expectRetType
+    expectedType <- lgets expectRetType
     when (expectedType /= Void)
         (throwError $ badTypesSuggestion "return statement" expectedType Void)
     updateCaughtRetType (Void, True)
@@ -443,7 +433,7 @@ runStmt (Cond ELitTrue stmt) = runStmt stmt
 runStmt (Cond ELitFalse stmt) = catchRet (runStmt stmt) >> return ()
 
 runStmt (Cond expr stmt) = do
-    (r1, t1) <- deduceType expr
+    (r1, t1) <- translateExpression expr
     (lab1, lname1) <- newLabel
     emit $ QCmpNe r1 (RegInt 0)
     lName <- makeLabelN lname1
@@ -467,7 +457,7 @@ runStmt (CondElse ELitFalse stmt1 stmt2) = do
 runStmt (CondElse expr stmt1 stmt2) = do
     (lab1, lname1) <- newLabel
     (lab2, lname2) <- newLabel
-    (r1, t1) <- deduceType expr
+    (r1, t1) <- translateExpression expr
     lName1 <- makeLabelN lname1
     lQuad1 <- makeLabelQ lname1
     lName2 <- makeLabelN lname2
@@ -476,7 +466,7 @@ runStmt (CondElse expr stmt1 stmt2) = do
     emit $ QJne lName1
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
-    (_, oldWasCaught) <- gets caughtRetType
+    (_, oldWasCaught) <- lgets caughtRetType
     (ret1, wasCaught1) <- catchRet $ runStmt stmt1
     emit $ QJmp lName2
     emit $ lab1
@@ -493,12 +483,12 @@ runStmt (While expr stmt) = do
     lName2 <- makeLabelN lname2
     lQuad2 <- makeLabelQ lname2
     emit lab1
-    (r1, t1) <- deduceType expr
+    (r1, t1) <- translateExpression expr
     emit $ QCmpNe r1 (RegInt 0)
     emit $ QJne lName2
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "while statement" Bool t1)
-    (retOld, oldWasCaught) <- gets caughtRetType
+    (retOld, oldWasCaught) <- lgets caughtRetType
     (newRet, newWasCaught) <- catchRet $ runStmt stmt
     when ((not oldWasCaught) && newWasCaught)
         (updateCaughtRetType (newRet, True))
@@ -506,8 +496,11 @@ runStmt (While expr stmt) = do
     emit lab2
 
 runStmt (SExp expr) = do
-    deduceType expr
+    translateExpression expr
     return ()
+
+
+
 
 countLocals2 :: [Stmt] -> Int
 countLocals2 [] = 0
@@ -549,9 +542,9 @@ defineFun (FnDef retType funName arguments block) = do
     (caughtRet, _) <- catchRet $ runBlock block
     when (caughtRet /= retType)
         (throwError $ badReturn funName retType)
-    cod <- gets code
-    ProgState memory locs bs fl ert crt fr cd flab <- get
-    put $ ProgState memory locs bs fl ert crt fr [] flab
+    cod <- lgets code
+    ProgState memory locs bs fl ert crt fr cd flab funs <- get
+    put $ ProgState memory locs bs fl ert crt fr [] flab funs
 
     return $ QBlock funName cod (countLocals block)
 
@@ -567,7 +560,7 @@ runProgram :: Program -> Eval [QBlock]
 runProgram (Program defList) = do
     declareNativeFunctions
     mapM_ declareFun defList
-    freeLoc <- gets freeLocation
+    freeLoc <- lgets freeLocation
     updateBlockStart freeLoc
     clearMemory
     mapM (preserveState . defineFun) defList
@@ -577,7 +570,7 @@ runText s = let ts = myLexer s in case pProgram ts of
     Bad s -> do hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
-    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [Reg1, Reg2, Reg3] [] 0) (runProgram tree) of
+    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [Reg1, Reg2, Reg3] [] 0 Map.empty) (runProgram tree) of
         Right (code, w) -> return $ code
         Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
