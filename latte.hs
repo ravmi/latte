@@ -84,9 +84,9 @@ putRegister :: Register -> Eval ()
 putRegister reg = do
     freeRegs <- lgets freeRegisters
     case reg of
-        Reg1 -> update freeRegisters (Reg1:freeRegs)
-        Reg2 -> update freeRegisters (Reg2:freeRegs)
-        Reg3 -> update freeRegisters (Reg3:freeRegs)
+        Reg 1 -> update freeRegisters (Reg 1:freeRegs)
+        Reg 2 -> update freeRegisters (Reg 2:freeRegs)
+        Reg 3 -> update freeRegisters (Reg 3:freeRegs)
         _ -> return ()
 
 update :: ProgState :-> a -> a -> Eval ()
@@ -182,8 +182,8 @@ allocateVar varName varType = do
     updateFreeLocation $ freeLoc + 1
     return freeLoc
 
-lookupName :: Ident -> Eval (Register, Type)
-lookupName name = do
+lookupVar :: Ident -> Eval (Register, Type)
+lookupVar name = do
     locs <- lgets locations
     mem <- lgets memory
     case Map.lookup name locs of
@@ -211,11 +211,11 @@ copyToRegister :: Register -> Eval Register
 copyToRegister pos = do
     freeReg <- getRegister
     case pos of
-        Mem i -> do emit $ QMov pos freeReg
+        Mem i -> do emit $ QLoad pos freeReg
                     return freeReg
-        RegInt i ->  do emit $ QMov pos freeReg
+        RegInt i ->  do emit $ QLoad pos freeReg
                         return freeReg
-        RegBool b -> do emit $ QMov pos freeReg
+        RegBool b -> do emit $ QLoad pos freeReg
                         return freeReg
         _ -> do putRegister freeReg
                 return pos
@@ -224,23 +224,15 @@ dedType :: Expr -> Eval Type
 dedType expr = do
     (r, t) <- translateExpression expr
     return t
--- @TODO odzielna mapa na funkcja
-
-
-
-
-
-
-
 
 
 translateExpression :: Expr -> Eval (Register, Type)
-translateExpression (EVar name) = lookupName name
+translateExpression (EVar name) = lookupVar name
 translateExpression (ELitInt i) = return (RegInt i, Int)
 translateExpression (ELitTrue) = return (RegBool True, Bool)
 translateExpression (ELitFalse) = return (RegBool False, Bool)
 translateExpression (EApp funName funArgs) = do
-    (hehe, Fun expectedRet expectedArgTypes)  <- lookupName funName
+    Fun expectedRet expectedArgTypes  <- lookupFunction funName
     argTypes <- mapM dedType funArgs
     when (argTypes /= expectedArgTypes)
        (throwError $ badApply funName expectedArgTypes argTypes)
@@ -266,6 +258,7 @@ translateExpression (Not expr) = do
     emit $ QNot r
     return (r, Bool)
 
+-- static calculation stuff here (both const, one const etc)
 translateExpression (EMul e1 op e2) = do
     (r1, t1) <- translateExpression e1
     (r2, t2) <- translateExpression e2
@@ -282,28 +275,26 @@ translateExpression (EMul e1 op e2) = do
 translateExpression (EAdd exp1 Plus exp2) = do
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
---    r2 <- copyToRegister r2
     when(t1 /= t2 || (t1 /= Str && t1 /= Int))
         (throwError $ badTypes "`+`" [t1, t2])
     r2 <- copyToRegister r2
     case t1 of
         Int -> do emit $ QAdd r1 r2
                   putRegister r1
-        Str -> do r3 <- getRegister
-                  emit $ QConcat r1 r2 r3
+                  return (r2, t1)
+        Str -> do emit $ QConcat r1 r2
                   putRegister r1
-                  putRegister r2
-    return (r2, t1)
+                  return (r2, t1)
 
 translateExpression (EAdd exp1 Minus exp2) = do
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypes "`+`" [t1, t2])
-    r2 <- copyToRegister r2
-    emit $ QAdd r1 r2
-    putRegister r1
-    return (r2, t1)
+    r1 <- copyToRegister r1
+    emit $ QSub r2 r1
+    putRegister r2
+    return (r1, t1)
 
 translateExpression (ERel exp1 EQU exp2) = do
     (r1, t1) <- translateExpression exp1
@@ -311,7 +302,10 @@ translateExpression (ERel exp1 EQU exp2) = do
     when ((t1 /= t2) || (t1 /= Int && t1 /= Str && t1 /= Bool))
         (throwError $ badTypes "`==`" [t1, t2])
     r2 <- copyToRegister r2
-    emit $ QCmpEq r1 r2
+    case t1 of
+        Int -> do emit $ QCmpNe r1 r2
+                  emit $ QNot r2
+        Bool -> do emit $ QXor r1 r2
     putRegister r1
     return (r2, Bool)
 
@@ -322,11 +316,16 @@ translateExpression (ERel exp1 op exp2) = do
         (throwError $ badTypesSuggestion "comparison operator" [Int, Int] [t1, t2])
     r2 <- copyToRegister r2
     case op of
-        LTH -> emit $ QCmpLt r1 r2
-        LE -> emit $ QCmpLe r1 r2
+        LTH -> do emit $ QSwap r1 r2
+                  emit $ QCmpGt r1 r2
+        LE -> do emit $ QCmpGt r1 r2
+                 emit $ QNot r2
         GTH -> emit $ QCmpGt r1 r2
-        GE -> emit $ QCmpGe r1 r2
-        EQU -> emit $ QCmpEq r1 r2
+        GE -> do emit $ QSwap r1 r2
+                 emit $ QCmpGt r1 r2
+                 emit $ QNot r2
+        EQU -> do emit $ QCmpNe r1 r2
+                  emit $ QNot r2
         NE -> emit $ QCmpNe r1 r2
     putRegister r1
     return (r2, Bool)
@@ -350,10 +349,6 @@ translateExpression (EOr exp1 exp2) = do
     emit $ QOr r1 r2
     putRegister r1
     return (r2, Bool)
-
-
-
-
 
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
@@ -383,6 +378,7 @@ declareItem expectedType (Init varName expr) = do
     r1 <- copyToRegister r1
     loc <- declare varName t1
     emit $ QAss r1 (Mem loc)
+    putRegister r1
 
 runStmt :: Stmt -> Eval ()
 runStmt Empty = return ()
@@ -399,6 +395,7 @@ runStmt (Ass varName expr) = do
         (throwError $ badTypesSuggestion "assignment" t2 t1)
     r1 <- copyToRegister r1
     emit $ QAss r1 r2
+    putRegister r1
 
 
 runStmt (Incr varName) = do
@@ -437,10 +434,9 @@ runStmt (Cond ELitFalse stmt) = catchRet (runStmt stmt) >> return ()
 runStmt (Cond expr stmt) = do
     (r1, t1) <- translateExpression expr
     (lab1, lname1) <- newLabel
-    emit $ QCmpNe r1 (RegInt 0)
     lName <- makeLabelN lname1
     lQuad <- makeLabelQ lname1
-    emit $ QJne lName
+    emit $ QCmpJne lName r1 (RegInt 0)
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
     catchRet $ runStmt stmt
@@ -464,8 +460,7 @@ runStmt (CondElse expr stmt1 stmt2) = do
     lQuad1 <- makeLabelQ lname1
     lName2 <- makeLabelN lname2
     lQuad2 <- makeLabelQ lname2
-    emit $ QCmpNe r1 (RegInt 0)
-    emit $ QJne lName1
+    emit $ QCmpJne lName1 r1 (RegInt 0)
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
     (_, oldWasCaught) <- lgets caughtRetType
@@ -486,8 +481,8 @@ runStmt (While expr stmt) = do
     lQuad2 <- makeLabelQ lname2
     emit lab1
     (r1, t1) <- translateExpression expr
-    emit $ QCmpNe r1 (RegInt 0)
-    emit $ QJne lName2
+    emit $ QCmpJne lName2 r1 (RegInt 0)
+    putRegister r1
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "while statement" Bool t1)
     (retOld, oldWasCaught) <- lgets caughtRetType
@@ -552,7 +547,7 @@ defineFun (FnDef retType funName arguments block) = do
     argTypes <- getArgTypes arguments
     updateExpectRetType retType
     update freeLocation (negate (length argNames))
-    mapM_ (uncurry declare) (zip argNames argTypes)
+    mapM_ (uncurry declare) (reverse $ zip argNames argTypes)
     update freeLocation 0
     (caughtRet, _) <- catchRet $ runBlock block
     when (caughtRet /= retType)
@@ -585,7 +580,7 @@ runText s = let ts = myLexer s in case pProgram ts of
     Bad s -> do hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
-    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [Reg1, Reg2, Reg3] [] 0 Map.empty) (runProgram tree) of
+    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [Reg 1, Reg 2, Reg 3, Reg 4, Reg 5] [] 0 Map.empty) (runProgram tree) of
         Right (code, w) -> return $ code
         Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
@@ -598,6 +593,7 @@ main = do
         [s] -> do
             code <- readFile s
             ps <- runText code
+            print $ ps
             putStrLn $ translateProgram ps
             return ()
         _ -> hPutStrLn stderr  "Only one argument!"
