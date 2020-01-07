@@ -20,6 +20,9 @@ import AbsLatte
 import ErrM
 import ImdLatte
 
+errToken :: String
+errToken = "errToken\n"
+
 varUninitialized :: Ident -> String
 varUninitialized (Ident varName) = "`" ++ varName ++  "`" ++ " uninitialized"
 
@@ -34,30 +37,30 @@ badApply (Ident funName) okTypes badTypes = errLog where
     why = "Wrong usage of function: `" ++ funName ++ "`"
     expected = "expected arguments: " ++ (show okTypes)
     used = "used types: " ++ (show badTypes)
-    errLog = why ++ "; " ++ expected ++ "; " ++ used
+    errLog = errToken ++ why ++ "; " ++ expected ++ "; " ++ used
 
 badTypesSuggestion :: (Show a, Show b) => String -> a -> b -> String
 badTypesSuggestion opName okTypes badTypes = errLog where
     why = "Wrong usage of " ++ opName
     expected = "expected type: " ++ (show okTypes)
     used = "used types: " ++ (show badTypes)
-    errLog = why ++ "; " ++ expected ++ "; " ++ used
+    errLog = errToken ++ why ++ "; " ++ expected ++ "; " ++ used
 
 badTypes :: (Show a) => String -> a -> String
 badTypes opName badTypes = errLog where
     why = "Wrong usage of " ++ opName
     used = "used types: " ++ (show badTypes)
-    errLog = why ++ "; " ++ used
+    errLog = errToken ++ why ++ "; " ++ used
 
 badReturn :: Ident -> Type -> String
 badReturn (Ident funName) retType = errLog where
     why = "Function `" ++ funName ++ "` doesn't return correct type in all possible runs"
     expected = "expected type: " ++ (show retType)
-    errLog = why ++ "; " ++ expected
+    errLog = errToken ++ why ++ "; " ++ expected
 
 repeatingArgs :: [Arg] -> String
 repeatingArgs arguments = errLog where
     why = "Some of the argument names repeat"
     showArg (Arg varType (Ident varName)) = show varType ++ " " ++ varName
     argList = map showArg arguments
-    errLog = why ++ ": " ++ "[" ++ (intercalate ", " argList) ++ "]"
+    errLog = errToken ++ why ++ ": " ++ "[" ++ (intercalate ", " argList) ++ "]"

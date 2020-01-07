@@ -581,5 +581,6 @@ main = do
             ps <- runText code
             print $ ps
             putStrLn $ translateProgram ps
+            putStrLn $ "OK"
             return ()
         _ -> hPutStrLn stderr  "Only one argument!"
