@@ -563,7 +563,8 @@ runProgram (Program defList) = do
 
 runText :: String -> IO [QBlock]
 runText s = let ts = myLexer s in case pProgram ts of
-    Bad s -> do hPutStrLn stderr "\nParse              Failed...\n"
+    Bad s -> do hPutStrLn stderr "ERROR"
+                hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
     Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [Reg 1, Reg 2, Reg 3, Reg 4, Reg 5] [] 0 Map.empty) (runProgram tree) of
@@ -571,16 +572,23 @@ runText s = let ts = myLexer s in case pProgram ts of
         Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
 
----        Right ((), (a, b)) -> return $ "All is OK"
+getFilename :: String -> String
+getFilename path = head $ splitOn "." fileName where
+                   fileName = last $ splitOn "/" path
+
+getDir :: String -> String
+getDir path = intercalate "" dirsNoLast where
+    dirs = splitOn "/" path
+    dirsNoLast = take ((length dirs) - 1) dirs
+
 main :: IO ()
 main = do
     args <- getArgs
     case args of
         [s] -> do
             code <- readFile s
-            ps <- runText code
-            print $ ps
-            putStrLn $ translateProgram ps
+            quads <- runText code
             putStrLn $ "OK"
-            return ()
+            writeFile ((getDir s) ++ "/" ++ (getFilename s) ++ ".s") (translateProgram quads)
         _ -> hPutStrLn stderr  "Only one argument!"
+
