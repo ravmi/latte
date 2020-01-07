@@ -1,0 +1,12 @@
+int g(int a, int b, int c, int d, int e) {
+    return a + b + c + d + e;
+}
+
+int main() {
+    int a1 = 23;
+    int a2 = 93;
+    int a3 = 3;
+    int a4 = 13;
+    int a5 = 222;
+    return g(a1, a2, a3, a4, a5);
+}
