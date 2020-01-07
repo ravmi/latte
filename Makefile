@@ -3,7 +3,7 @@ all:
 	happy -gca ParLatte.y
 	alex -g LexLatte.x
 	ghc --make TestLatte.hs -o TestLatte
-	ghc --make latte.hs asm32.hs -o latte
+	ghc --make latte.hs Asm64.hs -o latte
 
 clean:
 	-rm -f *.log *.aux *.hi *.o *.dvi *.x *.hi *.o AbsCodi.hs DocCodi.hs  ErrM.hs  PrintCodi.hs ParCodi.hs SkelCodi.hs TestCodi.hs DocCodi.txt LexCodi.hs ParCodi.y TestCodi interpreter *.bak
