@@ -1,9 +1,9 @@
 all:	ParLatte.hs latc_x86_64
 	alex -g LexLatte.x
-insc_jvm:	latc
+latc_x86_64:	latc
 	cp src/latc_x86_64 latc_x86_64
 
-comp_jvm:
+latc:
 	ghc --make -isrc src/latte.hs -o latte
 	
 clean:
