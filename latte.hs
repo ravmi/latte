@@ -205,6 +205,25 @@ dedType expr = do
     return t
 
 
+pairsToLists :: [(Register, Type)] -> ([Register], [Type])
+pairsToLists pairs = (map fst pairs, map snd pairs)
+
+
+emitPutArgs :: Int -> [Register] -> Eval ()
+emitPutArgs _ [] = return ()
+emitPutArgs i (r:t) = do
+    emit $ QPutArg i r
+    emitPutArgs (i+1) t
+
+emitPopArgs :: Int -> [Register] -> Eval ()
+emitPopArgs _ [] = return ()
+emitPopArgs i (r:t) = do
+    putRegister r
+    emit $ QPopArg i
+    emitPopArgs (i+1) t
+
+
+
 translateExpression :: Expr -> Eval (Register, Type)
 translateExpression (EVar name) = lookupVar name
 translateExpression (ELitInt i) = return (RegInt i, Int)
@@ -212,11 +231,18 @@ translateExpression (ELitTrue) = return (RegBool True, Bool)
 translateExpression (ELitFalse) = return (RegBool False, Bool)
 translateExpression (EApp funName funArgs) = do
     Fun expectedRet expectedArgTypes  <- lookupFunction funName
-    argTypes <- mapM dedType funArgs
+    results <- mapM translateExpression funArgs
+    (regs, argTypes) <- return $ pairsToLists results
     when (argTypes /= expectedArgTypes)
        (throwError $ badApply funName expectedArgTypes argTypes)
+
+    emitPutArgs 1 regs
     emit $ QCall funName
-    return (Mem 0, expectedRet)
+    emitPopArgs 1 (reverse regs)
+
+    -- @TODO moze sie sypnac, bo zabraknie rejestrow (dla duzej ilosci expressions np)
+    nReg <- getRegister
+    return (nReg, expectedRet)
 
 translateExpression (EString str) = do
     nReg <- getRegister

@@ -50,6 +50,8 @@ data Quadruple
     | QConcat Register Register
 
     | QCall Ident
+    | QPutArg Int Register
+    | QPopArg Int
     | QLoad Register Register
     | QStore Register Register
     deriving (Eq, Ord, Show, Read)
@@ -57,3 +59,4 @@ data Quadruple
 
 -- najpierw zaloz, ze nie uzywasz rejestrow ponownie, wszystko zapisuj w zmiennych lokalnych (tu bedzie problem)
 -- rozbij na bloki, lista w postaci blok, zmienne lokalne
+

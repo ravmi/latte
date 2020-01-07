@@ -139,17 +139,22 @@ translateQuadruple (QAlloc r i) = ["movq $" ++ num ++ ", %rdi", "call malloc", "
     num = show i
     tr = translateRegister r
 
---putFunctionArgument :: (Register, Int) -> String
---putFunctionArgument r i = let tr = translateRegister r in case i of
---    1 -> ["movq " ++ tr ++ ", rdi"
---    2 -> ["movq " ++ tr ++ ", rsi"
---    3 -> ["movq " ++ tr ++ ", rdx"
---    4 -> ["movq " ++ tr ++ ", rcx"
---    5 -> ["movq " ++ tr ++ ", r8"
---    6 -> ["movq " ++ tr ++ ", r9"
---    _ -> ["pushq " ++ tr"
+translateQuadruple (QPutArg i r) = sol where
+    tr = translateRegister r
+    sol = case i of
+        1 -> ["movq " ++ tr ++ ", rdi"]
+        2 -> ["movq " ++ tr ++ ", rsi"]
+        3 -> ["movq " ++ tr ++ ", rdx"]
+        4 -> ["movq " ++ tr ++ ", rcx"]
+        5 -> ["movq " ++ tr ++ ", r8"]
+        6 -> ["movq " ++ tr ++ ", r9"]
+        _ -> ["pushq " ++ tr]
 
---translateQuadruple (QCall function) = []
+translateQuadruple (QPopArg i) = case i <= 6 of
+    True -> []
+    False -> ["pop rdi"]
+
+translateQuadruple (QCall (Ident name)) = ["call " ++ name]
 
 
 translateFunction :: QBlock -> String
