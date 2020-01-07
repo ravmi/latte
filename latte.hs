@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell, TypeOperators #-}
 module Main where
 
-import Asm32
+import Asm64
 
 import Control.Category
 import Data.Label hiding (get)
@@ -97,10 +97,11 @@ update fun val = do
 lgets :: MonadState f m => f :-> a -> m a
 lgets f = gets (L.get f)
 
-newLabel :: Eval (Quadruple, Integer)
+newLabel :: Eval (Integer)
 newLabel = do
     flab <- lgets freeLabel
-    return $ (QLab (Ident ("L" ++ (show flab))), flab)
+    update freeLabel (flab + 1)
+    return $ flab
 
 makeLabelN :: Integer -> Eval Ident
 makeLabelN i = do
@@ -433,7 +434,7 @@ runStmt (Cond ELitFalse stmt) = catchRet (runStmt stmt) >> return ()
 
 runStmt (Cond expr stmt) = do
     (r1, t1) <- translateExpression expr
-    (lab1, lname1) <- newLabel
+    lname1 <- newLabel
     lName <- makeLabelN lname1
     lQuad <- makeLabelQ lname1
     emit $ QCmpJne lName r1 (RegInt 0)
@@ -453,8 +454,8 @@ runStmt (CondElse ELitFalse stmt1 stmt2) = do
     runStmt stmt2
 
 runStmt (CondElse expr stmt1 stmt2) = do
-    (lab1, lname1) <- newLabel
-    (lab2, lname2) <- newLabel
+    lname1 <- newLabel
+    lname2 <- newLabel
     (r1, t1) <- translateExpression expr
     lName1 <- makeLabelN lname1
     lQuad1 <- makeLabelQ lname1
@@ -466,20 +467,20 @@ runStmt (CondElse expr stmt1 stmt2) = do
     (_, oldWasCaught) <- lgets caughtRetType
     (ret1, wasCaught1) <- catchRet $ runStmt stmt1
     emit $ QJmp lName2
-    emit $ lab1
+    emit $ lQuad1
     (ret2, wasCaught2) <- catchRet $ runStmt stmt2
-    emit $ lab2
+    emit $ lQuad2
     when (not oldWasCaught && wasCaught1 && wasCaught2 && (ret1 == ret2))
         (updateCaughtRetType (ret1, True))
 
 runStmt (While expr stmt) = do
-    (lab1, lname1) <- newLabel
-    (lab2, lname2) <- newLabel
+    lname1 <- newLabel
+    lname2 <- newLabel
     lName1 <- makeLabelN lname1
     lQuad1 <- makeLabelQ lname1
     lName2 <- makeLabelN lname2
     lQuad2 <- makeLabelQ lname2
-    emit lab1
+    emit lQuad1
     (r1, t1) <- translateExpression expr
     emit $ QCmpJne lName2 r1 (RegInt 0)
     putRegister r1
@@ -490,7 +491,7 @@ runStmt (While expr stmt) = do
     when ((not oldWasCaught) && newWasCaught)
         (updateCaughtRetType (newRet, True))
     emit $ QJmp lName1
-    emit lab2
+    emit lQuad2
 
 runStmt (SExp expr) = do
     translateExpression expr
@@ -540,6 +541,7 @@ modifyState getter ev = do
     put prevState
     update getter val
     return ret
+
 
 defineFun :: TopDef -> Eval (QBlock)
 defineFun (FnDef retType funName arguments block) = do

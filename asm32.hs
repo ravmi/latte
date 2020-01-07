@@ -1,9 +1,8 @@
-module Asm32 where
+module Asm64 where
 
 import Control.Category
 import Data.Label hiding (get)
 import Prelude hiding ((.), id)
-
 import Control.Monad.Identity
 import Control.Monad.Except
 import Control.Monad.Reader
@@ -24,57 +23,65 @@ import PrintLatte
 import AbsLatte
 import ErrM
 import ImdLatte
-
--- ecx, edx - general use
--- eax - pomocniczy w tej bibliotece
+--rdx, rsi, rsi, rdx <- better don't use it yet
 
 translateRegister :: Register -> String
-translateRegister (Mem i) = if i < 0 then (show ((i - 2) * 4)) ++ "(%ebp)" else show (i * 4) ++ "(%ebp)"
-translateRegister (RegInt i) = "$" ++ (show i)
-translateRegister (RegBool True) = "1"
-translateRegister (RegBool False) = "0"
-translateRegister (Reg 1) = "%r1"
-translateRegister (Reg 2) = "%r2"
---translateRegister Reg3 = "%eax edx tez nie moze byc"
 
+translateRegister (Mem i) = case i < 0 of
+    True -> (show ((1 - i) * 8)) ++ "(%rbp)"
+    False -> (show ((-i - 1) * 8)) ++ "(%rbp)"
+translateRegister (RegInt i) = "$" ++ (show i)
+
+translateRegister (RegBool True) = "$-1"
+
+translateRegister (RegBool False) = "$0"
+
+translateRegister (Reg 1) = "%r12"
+translateRegister (Reg 2) = "%r13"
+translateRegister (Reg 3) = "%r14"
+translateRegister (Reg 4) = "%r15"
+translateRegister (Reg 5) = "%rbx"
+
+--rax, rcx, rdx, rsi, rdi, r8-r11 are caller saved
+--RDI,RSI,RDX,RCX,R8,R9 - argumenty funkcji
 
 translateQuadruple :: Quadruple -> [String]
-translateQuadruple (QAdd r1 r2) = ["addl " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QAdd r1 r2) = ["addq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QSub r1 r2) = ["subl " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QSub r1 r2) = ["subq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QMul r1 r2) = ["imull " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QMul r1 r2) = ["imulq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QDiv r1 r2) = ["movl " ++ tr1 ++ ", %eax", "idivl " ++ tr2, "movl %eax, " ++ tr2] where
+translateQuadruple (QDiv r1 r2) = ["movq " ++ tr1 ++ ", %rax", "idivq " ++ tr2, "movq %rax, " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QMod r1 r2) = ["movl " ++ tr1 ++ ", %eax", "idivl " ++ tr2, "movl %edx, " ++ tr2] where
+translateQuadruple (QMod r1 r2) = ["movq " ++ tr1 ++ ", %rax", "idivq " ++ tr2, "movq %rdx, " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QAss r1 r2) = ["movl " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QAss r1 r2) = ["movq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QInc r) = ["incl " ++ tr] where
+translateQuadruple (QInc r) = ["incq " ++ tr] where
     tr = translateRegister r
 
-translateQuadruple (QDec r) = ["decl " ++ tr] where
+translateQuadruple (QDec r) = ["decq " ++ tr] where
     tr = translateRegister r
 
 translateQuadruple (QRet r) = [copyToEax, "leave", "ret"] where
-    copyToEax = "movl " ++ translateRegister r ++ ", %eax"
+    copyToEax = "movq " ++ translateRegister r ++ ", %rax"
 
 translateQuadruple (QRetV) = ["leave", "ret"]
 
-translateQuadruple (QLab (Ident name)) = ["name" ++ ":"]
+translateQuadruple (QLab (Ident name)) = [name ++ ":"]
 
 translateQuadruple (QJmp (Ident name)) = ["jmp " ++ name]
 
@@ -98,44 +105,43 @@ translateQuadruple (QCmpJL (Ident name) r1 r2) = ["cmp " ++ tr2 ++ ", " ++ tr1, 
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QNeg r) = ["negl " ++ (translateRegister r)]
+translateQuadruple (QNeg r) = ["negq " ++ (translateRegister r)]
 
-translateQuadruple (QAnd r1 r2) = ["andl " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QAnd r1 r2) = ["andq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QOr r1 r2) = ["orl " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QOr r1 r2) = ["orq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QNot r) = ["notl " ++ (translateRegister r)]
+translateQuadruple (QNot r) = ["notq " ++ (translateRegister r)]
 
-translateQuadruple (QSwap r1 r2) = ["xchgl " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QSwap r1 r2) = ["xchgq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QXor r1 r2) = ["xorl " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QXor r1 r2) = ["xorq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QCmpGt r1 r2) = ["subl " ++ tr1 ++ ", " ++ tr2] where
+translateQuadruple (QCmpGt r1 r2) = ["subq " ++ tr1 ++ ", " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QCmpNe r1 r2) = ["subl " ++ tr1 ++ ", " ++ tr2, "fabs " ++ tr2, "neg " ++ tr2] where
+translateQuadruple (QCmpNe r1 r2) = ["subq " ++ tr1 ++ ", " ++ tr2, "fabs " ++ tr2, "neg " ++ tr2] where
     tr1 = translateRegister r1
     tr2 = translateRegister r2
 
-translateQuadruple (QLoad r1 r2) = ["movl " ++ (translateRegister r1) ++ ", " ++ (translateRegister r2)]
+translateQuadruple (QLoad r1 r2) = ["movq " ++ (translateRegister r1) ++ ", " ++ (translateRegister r2)]
 
-translateQuadruple (QAlloc r i) = ["movl $" ++ num ++ ", %edi", "call malloc", "movl %rax, " ++ tr]
+translateQuadruple (QAlloc r i) = ["movq $" ++ num ++ ", %rdi", "call malloc", "movq %rax, " ++ tr] where
     num = show i
     tr = translateRegister r
 
-
 translateFunction :: QBlock -> String
 translateFunction (QBlock (Ident fname) quads locals) = intercalate "\n" allCode where
-    prolog = ["push %ebp", "movl %esp, %ebp", "subl $" ++ show(locals * 4) ++ ", %esp"]
+    prolog = ["push %ebp", "movq %rsp, %rbp", "subq $" ++ show(locals * 4) ++ ", %rsp"]
     content = concat $ map translateQuadruple quads
     code = prolog ++ content
     allCode = [fname ++ ":"] ++ map ("    "++) code
