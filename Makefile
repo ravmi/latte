@@ -1,14 +1,31 @@
-all:
-	bnfc Latte.cf
-	happy -gca ParLatte.y
+all:	ParLatte.hs latc_x86_64
 	alex -g LexLatte.x
-	ghc --make TestLatte.hs -o TestLatte
-	ghc --make latte.hs Asm64.hs -o lat_to_asm
+insc_jvm:	latc
+	cp src/latc_x86_64 latc_x86_64
 
-clean:
-	-rm -f *.log *.aux *.hi *.o *.dvi *.x *.hi *.o AbsCodi.hs DocCodi.hs  ErrM.hs  PrintCodi.hs ParCodi.hs SkelCodi.hs TestCodi.hs DocCodi.txt LexCodi.hs ParCodi.y TestCodi interpreter *.bak
-
-distclean: clean
-	-rm -f DocCodi.* LexCodi.* ParCodi.* LayoutCodi.* SkelCodi.* PrintCodi.* TestCodi.* AbsCodi.* TestCodi ErrM.* SharedString.* ComposOp.* codi.dtd XMLCodi.* Makefile*
+comp_jvm:
+	ghc --make -isrc src/latte.hs -o latte
 	
+clean:
+	rm -f latte latc_x86_64
+	rm -f *.log *.aux *.hi *.o *.dvi
+	rm -f DocLatte.ps
+	rm -f src/*.hi src/*.o
+	rm -f ParLatte.hs ParLatte.y LexLatte.x DocLatte.txt
+	rm -f Latte.cf ErrM.hs PrintLatte.hs TestLatte.hs TestLatte
+	rm -f SkelLatte.hs LexLatte.hs AbsLatte.hs
 
+
+ParLatte.y:	Latte.cf
+	alex -g LexLatte.x
+Latte.cf:
+	cp src/Latte.cf .
+	cp src/AbsLatte.hs .
+	cp src/ErrM.hs .
+	cp src/LexLatte.x .
+	cp src/ParLatte.y .
+	cp src/PrintLatte.hs .
+	cp src/SkelLatte.hs .
+
+ParLatte.hs:	ParLatte.y
+	happy -gca $<
