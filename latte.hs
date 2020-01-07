@@ -104,7 +104,7 @@ newLabel = do
 
 makeLabelN :: Integer -> Eval Ident
 makeLabelN i = do
-    return $ Ident ("L" ++ (show i))
+    return $ Ident (".L" ++ (show i))
 
 makeLabelQ :: Integer -> Eval Quadruple
 makeLabelQ i = do
@@ -199,30 +199,8 @@ copyToRegister pos = do
         _ -> do putRegister freeReg
                 return pos
 
-dedType :: Expr -> Eval Type
-dedType expr = do
-    (r, t) <- translateExpression expr
-    return t
-
-
 pairsToLists :: [(Register, Type)] -> ([Register], [Type])
 pairsToLists pairs = (map fst pairs, map snd pairs)
-
-
-emitPutArgs :: Int -> [Register] -> Eval ()
-emitPutArgs _ [] = return ()
-emitPutArgs i (r:t) = do
-    emit $ QPutArg i r
-    emitPutArgs (i+1) t
-
-emitPopArgs :: Int -> [Register] -> Eval ()
-emitPopArgs _ [] = return ()
-emitPopArgs i (r:t) = do
-    putRegister r
-    emit $ QPopArg i
-    emitPopArgs (i+1) t
-
-
 
 translateExpression :: Expr -> Eval (Register, Type)
 translateExpression (EVar name) = lookupVar name
@@ -235,12 +213,9 @@ translateExpression (EApp funName funArgs) = do
     (regs, argTypes) <- return $ pairsToLists results
     when (argTypes /= expectedArgTypes)
        (throwError $ badApply funName expectedArgTypes argTypes)
-
-    emitPutArgs 1 regs
-    emit $ QCall funName
-    emitPopArgs 1 (reverse regs)
-
-    -- @TODO moze sie sypnac, bo zabraknie rejestrow (dla duzej ilosci expressions np)
+    emit $ QCall funName regs
+    mapM_ putRegister regs
+    -- @TODO realloc registers
     nReg <- getRegister
     return (nReg, expectedRet)
 
@@ -307,10 +282,7 @@ translateExpression (ERel exp1 EQU exp2) = do
     when ((t1 /= t2) || (t1 /= Int && t1 /= Str && t1 /= Bool))
         (throwError $ badTypes "`==`" [t1, t2])
     r2 <- copyToRegister r2
-    case t1 of
-        Int -> do emit $ QCmpNe r1 r2
-                  emit $ QNot r2
-        Bool -> do emit $ QXor r1 r2
+    emit $ QCmpIntEq r1 r2
     putRegister r1
     return (r2, Bool)
 
@@ -321,17 +293,12 @@ translateExpression (ERel exp1 op exp2) = do
         (throwError $ badTypesSuggestion "comparison operator" [Int, Int] [t1, t2])
     r2 <- copyToRegister r2
     case op of
-        LTH -> do emit $ QSwap r1 r2
-                  emit $ QCmpGt r1 r2
-        LE -> do emit $ QCmpGt r1 r2
-                 emit $ QNot r2
-        GTH -> emit $ QCmpGt r1 r2
-        GE -> do emit $ QSwap r1 r2
-                 emit $ QCmpGt r1 r2
-                 emit $ QNot r2
-        EQU -> do emit $ QCmpNe r1 r2
-                  emit $ QNot r2
-        NE -> emit $ QCmpNe r1 r2
+        LTH -> do emit $ QCmpIntLt r1 r2
+        LE -> do  emit $ QCmpIntLe r1 r2
+        GTH -> emit $ QCmpIntGt r1 r2
+        GE -> do emit $ QCmpIntGe r1 r2
+        EQU -> do emit $ QCmpIntEq r1 r2
+        NE -> emit $ QCmpIntNe r1 r2
     putRegister r1
     return (r2, Bool)
 
@@ -441,7 +408,7 @@ runStmt (Cond expr stmt) = do
     lname1 <- newLabel
     lName <- makeLabelN lname1
     lQuad <- makeLabelQ lname1
-    emit $ QCmpJne lName r1 (RegInt 0)
+    emit $ QCmpJne lName r1 (RegInt (-1))
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
     catchRet $ runStmt stmt
@@ -465,7 +432,7 @@ runStmt (CondElse expr stmt1 stmt2) = do
     lQuad1 <- makeLabelQ lname1
     lName2 <- makeLabelN lname2
     lQuad2 <- makeLabelQ lname2
-    emit $ QCmpJne lName1 r1 (RegInt 0)
+    emit $ QCmpJne lName1 r1 (RegInt (-1))
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
     (_, oldWasCaught) <- lgets caughtRetType
@@ -486,7 +453,7 @@ runStmt (While expr stmt) = do
     lQuad2 <- makeLabelQ lname2
     emit lQuad1
     (r1, t1) <- translateExpression expr
-    emit $ QCmpJne lName2 r1 (RegInt 0)
+    emit $ QCmpJne lName2 r1 (RegInt (-1))
     putRegister r1
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "while statement" Bool t1)
@@ -568,7 +535,7 @@ defineFun (FnDef retType funName arguments block) = do
     ProgState memory locs bs fl ert crt fr cd flab funs <- get
     update code []
 
-    return $ QBlock funName cod (countLocals block)
+    return $ QBlock funName cod (countLocals block) (length argNames)
 
 declareNativeFunctions :: Eval ()
 declareNativeFunctions = do
@@ -614,7 +581,7 @@ main = do
         [s] -> do
             code <- readFile s
             quads <- runText code
+            --print quads
             putStrLn $ "OK"
             writeFile ((getDir s) ++ "/" ++ (getFilename s) ++ ".s") (translateProgram quads)
         _ -> hPutStrLn stderr  "Only one argument!"
-

@@ -6,5 +6,6 @@ int main() {
         s = s + i;
         i = i + 1;
     }
-    return s;
+    printInt(s);
+    return 0;
 }

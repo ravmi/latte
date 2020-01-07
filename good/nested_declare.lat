@@ -1,12 +1,13 @@
 int main() {
-    int a;
+    int a = 1;
     {
         string a;
         string b;
         {
-            int a;
+            int a = 20;
             int b = a;
         }
     }
+    printInt(a);
     return a;
 }

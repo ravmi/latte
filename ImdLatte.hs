@@ -9,11 +9,13 @@ data Register = Mem Int | RegInt Integer | RegBool Bool | Reg Int
   deriving (Eq, Ord, Show, Read)
 
 
-data QBlock = QBlock Ident [Quadruple] Int
+data QBlock = QBlock Ident [Quadruple] Int Int
   deriving (Eq, Ord, Show, Read)
 
 
 type QCode = [Quadruple]
+
+-- niech drugi argument to bedzie zawsze register (nie pamiec)
 
 data Quadruple
     = QAdd Register Register
@@ -43,15 +45,18 @@ data Quadruple
     | QNot Register
     | QSwap Register Register
 
-    | QCmpGt Register Register
-    | QCmpNe Register Register
+    | QCmpIntLt Register Register
+    | QCmpIntLe Register Register
+    | QCmpIntGt Register Register
+    | QCmpIntGe Register Register
+    | QCmpIntEq Register Register
+    | QCmpIntNe Register Register
+
 
     | QAlloc Register Int
     | QConcat Register Register
 
-    | QCall Ident
-    | QPutArg Int Register
-    | QPopArg Int
+    | QCall Ident [Register]
     | QLoad Register Register
     | QStore Register Register
     deriving (Eq, Ord, Show, Read)

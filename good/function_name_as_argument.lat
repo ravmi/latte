@@ -6,3 +6,6 @@ int a () {
 boolean b (boolean a) {
     return a;
 }
+
+int main() {
+}
