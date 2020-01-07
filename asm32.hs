@@ -139,6 +139,19 @@ translateQuadruple (QAlloc r i) = ["movq $" ++ num ++ ", %rdi", "call malloc", "
     num = show i
     tr = translateRegister r
 
+--putFunctionArgument :: (Register, Int) -> String
+--putFunctionArgument r i = let tr = translateRegister r in case i of
+--    1 -> ["movq " ++ tr ++ ", rdi"
+--    2 -> ["movq " ++ tr ++ ", rsi"
+--    3 -> ["movq " ++ tr ++ ", rdx"
+--    4 -> ["movq " ++ tr ++ ", rcx"
+--    5 -> ["movq " ++ tr ++ ", r8"
+--    6 -> ["movq " ++ tr ++ ", r9"
+--    _ -> ["pushq " ++ tr"
+
+--translateQuadruple (QCall function) = []
+
+
 translateFunction :: QBlock -> String
 translateFunction (QBlock (Ident fname) quads locals) = intercalate "\n" allCode where
     prolog = ["push %ebp", "movq %rsp, %rbp", "subq $" ++ show(locals * 4) ++ ", %rsp"]

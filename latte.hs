@@ -74,11 +74,10 @@ emit q = do
 
 getRegister :: Eval (Register)
 getRegister = do
-    ProgState memory locs bs fl ert crt freeRegisters cd flab funs <- get
-    freeReg <- return $ head freeRegisters
-    put $ ProgState memory locs bs fl ert crt (tail freeRegisters) cd flab funs
-    return $ freeReg
-
+    freeRegs <- lgets freeRegisters
+    firstReg <- return $ head freeRegs
+    update freeRegisters (tail freeRegs)
+    return $ firstReg
 
 putRegister :: Register -> Eval ()
 putRegister reg = do
@@ -118,29 +117,8 @@ insertMemory key val = do
 
 insertLocations :: Ident -> Location -> Eval ()
 insertLocations key val = do
-    ProgState memory locs bs fl ert crt fr cd flab funs <- get
     locs <- lgets locations
     update locations (Map.insert key val locs)
-
-updateBlockStart :: Location -> Eval ()
-updateBlockStart new = do
-    ProgState memory locs bs fl ert crt fr cd flab funs <- get
-    put $ ProgState memory locs new fl ert crt fr cd flab funs
-
-updateFreeLocation :: Location -> Eval ()
-updateFreeLocation new = do
-    ProgState memory locs bs fl ert crt fr cd flab funs <- get
-    put $ ProgState memory locs bs new ert crt fr cd flab funs
-
-updateExpectRetType :: Type -> Eval ()
-updateExpectRetType new = do
-    ProgState memory locs bs fl ert crt fr cd flab funs <- get
-    put $ ProgState memory locs bs fl new crt fr cd flab funs
-
-updateCaughtRetType :: (Type, Bool) -> Eval ()
-updateCaughtRetType new = do
-    ProgState memory locs bs fl ert crt fr cd flab funs <- get
-    put $ ProgState memory locs bs fl ert new fr cd flab funs
 
 clearMemory :: Eval ()
 clearMemory = do
@@ -171,7 +149,7 @@ catchRet ev = do
     oldRet <- lgets caughtRetType
     ev
     newRet <- lgets caughtRetType
-    updateCaughtRetType oldRet
+    update caughtRetType oldRet
     return newRet
 
 allocateVar :: Ident -> Type -> Eval Int
@@ -180,7 +158,7 @@ allocateVar varName varType = do
     locs <- lgets locations
     insertMemory freeLoc (Mem freeLoc, varType)
     insertLocations varName freeLoc
-    updateFreeLocation $ freeLoc + 1
+    update freeLocation (freeLoc + 1)
     return freeLoc
 
 lookupVar :: Ident -> Eval (Register, Type)
@@ -237,7 +215,7 @@ translateExpression (EApp funName funArgs) = do
     argTypes <- mapM dedType funArgs
     when (argTypes /= expectedArgTypes)
        (throwError $ badApply funName expectedArgTypes argTypes)
-    emit $ QFunc funName
+    emit $ QCall funName
     return (Mem 0, expectedRet)
 
 translateExpression (EString str) = do
@@ -259,7 +237,7 @@ translateExpression (Not expr) = do
     emit $ QNot r
     return (r, Bool)
 
--- static calculation stuff here (both const, one const etc)
+-- static calculation stuff can be added here (both const, one const etc)
 translateExpression (EMul e1 op e2) = do
     (r1, t1) <- translateExpression e1
     (r2, t2) <- translateExpression e2
@@ -354,7 +332,7 @@ translateExpression (EOr exp1 exp2) = do
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
     freeLoc <- lgets freeLocation
-    updateBlockStart freeLoc
+    update blockStart freeLoc
     mapM_ runStmt statements
 
 declare :: Ident -> Type -> Eval (Int)
@@ -386,7 +364,7 @@ runStmt Empty = return ()
 
 runStmt (BStmt block) = do
     ret <- preserveState $ catchRet (runBlock block)
-    updateCaughtRetType ret
+    update caughtRetType ret
 
 runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
 runStmt (Ass varName expr) = do
@@ -418,14 +396,14 @@ runStmt (Ret expr) = do
     expectedType <- lgets expectRetType
     when (t1 /= expectedType)
         (throwError $ badTypesSuggestion "return statement" expectedType t1)
-    updateCaughtRetType (t1, True)
+    update caughtRetType (t1, True)
     emit $ QRet r1
 
 runStmt (VRet) = do
     expectedType <- lgets expectRetType
     when (expectedType /= Void)
         (throwError $ badTypesSuggestion "return statement" expectedType Void)
-    updateCaughtRetType (Void, True)
+    update caughtRetType (Void, True)
     emit $ QRetV
 
 runStmt (Cond ELitTrue stmt) = runStmt stmt
@@ -447,7 +425,7 @@ runStmt (Cond expr stmt) = do
 runStmt (CondElse ELitTrue stmt1 stmt2) = do
     retOld <- catchRet $ runStmt stmt1
     runStmt stmt2
-    updateCaughtRetType retOld
+    update caughtRetType retOld
 
 runStmt (CondElse ELitFalse stmt1 stmt2) = do
     catchRet $ runStmt stmt1
@@ -471,7 +449,7 @@ runStmt (CondElse expr stmt1 stmt2) = do
     (ret2, wasCaught2) <- catchRet $ runStmt stmt2
     emit $ lQuad2
     when (not oldWasCaught && wasCaught1 && wasCaught2 && (ret1 == ret2))
-        (updateCaughtRetType (ret1, True))
+        (update caughtRetType (ret1, True))
 
 runStmt (While expr stmt) = do
     lname1 <- newLabel
@@ -489,7 +467,7 @@ runStmt (While expr stmt) = do
     (retOld, oldWasCaught) <- lgets caughtRetType
     (newRet, newWasCaught) <- catchRet $ runStmt stmt
     when ((not oldWasCaught) && newWasCaught)
-        (updateCaughtRetType (newRet, True))
+        (update caughtRetType (newRet, True))
     emit $ QJmp lName1
     emit lQuad2
 
@@ -533,6 +511,12 @@ declareFun (FnDef retType funName arguments _) = do
         Just t -> throwError $ alreadyDeclared funName
         _ -> update functions (Map.insert funName (Fun retType argTypes) funs)
 
+insertFunction :: String -> Type -> Eval ()
+insertFunction name funType = do
+    funs <- lgets functions
+    update functions (Map.insert (Ident name) funType funs)
+
+
 modifyState :: ProgState :-> a -> Eval (b) -> Eval b
 modifyState getter ev = do
     prevState <- get
@@ -547,7 +531,7 @@ defineFun :: TopDef -> Eval (QBlock)
 defineFun (FnDef retType funName arguments block) = do
     argNames <- getArgNames arguments
     argTypes <- getArgTypes arguments
-    updateExpectRetType retType
+    update expectRetType retType
     update freeLocation (negate (length argNames))
     mapM_ (uncurry declare) (reverse $ zip argNames argTypes)
     update freeLocation 0
@@ -556,16 +540,16 @@ defineFun (FnDef retType funName arguments block) = do
         (throwError $ badReturn funName retType)
     cod <- lgets code
     ProgState memory locs bs fl ert crt fr cd flab funs <- get
-    put $ ProgState memory locs bs fl ert crt fr [] flab funs
+    update code []
 
     return $ QBlock funName cod (countLocals block)
 
 declareNativeFunctions :: Eval ()
 declareNativeFunctions = do
-    declare (Ident "printInt") (Fun Void [Int])
-    declare (Ident "printString") (Fun Void [Str])
-    declare (Ident "readInt") (Fun Int [])
-    declare (Ident "readString") (Fun Str [])
+    insertFunction "printInt" (Fun Void [Int])
+    insertFunction "printString" (Fun Void [Str])
+    insertFunction "readInt" (Fun Int [])
+    insertFunction "readString" (Fun Str [])
     return ()
 
 runProgram :: Program -> Eval [QBlock]
@@ -573,7 +557,7 @@ runProgram (Program defList) = do
     declareNativeFunctions
     mapM_ declareFun defList
     freeLoc <- lgets freeLocation
-    updateBlockStart freeLoc
+    update blockStart freeLoc
     clearMemory
     mapM (preserveState . defineFun) defList
 

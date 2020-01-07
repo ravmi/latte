@@ -49,7 +49,7 @@ data Quadruple
     | QAlloc Register Int
     | QConcat Register Register
 
-    | QFunc Ident
+    | QCall Ident
     | QLoad Register Register
     | QStore Register Register
     deriving (Eq, Ord, Show, Read)
