@@ -21,13 +21,13 @@ import ErrM
 import ImdLatte
 
 errToken :: String
-errToken = "errToken\n"
+errToken = "ERROR\n"
 
 varUninitialized :: Ident -> String
-varUninitialized (Ident varName) = "`" ++ varName ++  "`" ++ " uninitialized"
+varUninitialized (Ident varName) = errToken ++ "`" ++ varName ++  "`" ++ " uninitialized"
 
 alreadyDeclared :: Ident -> String
-alreadyDeclared (Ident varName) = "`" ++ varName ++  "`" ++ " declared before in the same scope"
+alreadyDeclared (Ident varName) = errToken ++ "`" ++ varName ++  "`" ++ " declared before in the same scope"
 
 unexpected :: String
 unexpected = "Something very bad happened"
