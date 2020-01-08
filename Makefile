@@ -19,6 +19,7 @@ clean:
 	rm -f ./*.dyn_o
 	rm -f ./src/*.dyn_hi
 	rm -f ./src/*.dyn_o
+	for f in $(ls ./good/*.lat | cut -d / -f 3 | cut -d . -f 1); do rm -f ./good/$f; done
 
 
 ParLatte.y:	Latte.cf
