@@ -408,7 +408,7 @@ runStmt (Cond expr stmt) = do
     lname1 <- newLabel
     lName <- makeLabelN lname1
     lQuad <- makeLabelQ lname1
-    emit $ QCmpJne lName r1 (RegInt (-1))
+    emit $ QGoToIfNotEqual lName r1 (RegInt (-1))
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
     catchRet $ runStmt stmt
@@ -432,7 +432,7 @@ runStmt (CondElse expr stmt1 stmt2) = do
     lQuad1 <- makeLabelQ lname1
     lName2 <- makeLabelN lname2
     lQuad2 <- makeLabelQ lname2
-    emit $ QCmpJne lName1 r1 (RegInt (-1))
+    emit $ QGoToIfNotEqual lName1 r1 (RegInt (-1))
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
     (_, oldWasCaught) <- lgets caughtRetType
@@ -453,7 +453,7 @@ runStmt (While expr stmt) = do
     lQuad2 <- makeLabelQ lname2
     emit lQuad1
     (r1, t1) <- translateExpression expr
-    emit $ QCmpJne lName2 r1 (RegInt (-1))
+    emit $ QGoToIfNotEqual lName2 r1 (RegInt (-1))
     putRegister r1
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "while statement" Bool t1)
@@ -504,6 +504,8 @@ declareFun (FnDef retType funName arguments _) = do
         Just t -> throwError $ alreadyDeclared funName
         _ -> update functions (Map.insert funName (Fun retType argTypes) funs)
 
+
+-- the types are wrong here
 insertFunction :: String -> Type -> Eval ()
 insertFunction name funType = do
     funs <- lgets functions
@@ -519,6 +521,11 @@ modifyState getter ev = do
     update getter val
     return ret
 
+flushCode :: Eval ([Quadruple])
+flushCode = do
+    c <- lgets code
+    update code []
+    return c
 
 defineFun :: TopDef -> Eval (QBlock)
 defineFun (FnDef retType funName arguments block) = do
@@ -531,11 +538,9 @@ defineFun (FnDef retType funName arguments block) = do
     (caughtRet, _) <- catchRet $ runBlock block
     when (caughtRet /= retType)
         (throwError $ badReturn funName retType)
-    cod <- lgets code
-    ProgState memory locs bs fl ert crt fr cd flab funs <- get
-    update code []
+    c <- flushCode
 
-    return $ QBlock funName cod (countLocals block) (length argNames)
+    return $ QBlock funName c (countLocals block) (length argNames)
 
 declareNativeFunctions :: Eval ()
 declareNativeFunctions = do

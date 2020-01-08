@@ -31,12 +31,13 @@ data Quadruple
     | QLab Ident
     | QJmp Ident
 
-    | QCmpJe Ident Register Register
-    | QCmpJne Ident Register Register
-    | QCmpJg Ident Register Register
-    | QCmpJge Ident Register Register
-    | QCmpJL Ident Register Register
-    | QCmpJLe Ident Register Register
+    | QGoToIfEqual Ident Register Register
+    | QGoToIfNotEqual Ident Register Register
+    | QGoToIfGreater Ident Register Register
+    | QGoToIfGreaterEqual Ident Register Register
+    | QGoToIfLesser Ident Register Register
+    | QGoToIfLesserEqual Ident Register Register
+
 
     | QNeg Register
     | QAnd Register Register

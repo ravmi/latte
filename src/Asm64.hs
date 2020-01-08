@@ -101,27 +101,27 @@ translateQuadruple (QLab (Ident name)) = return $ ["." ++ name ++ ":"]
 
 translateQuadruple (QJmp (Ident name)) = return $ ["jmp " ++ name]
 
-translateQuadruple (QCmpJe (Ident name) r1 r2) = do
+translateQuadruple (QGoToIfEqual (Ident name) r1 r2) = do
     tr1 <- translateRegister r1
     tr2 <- translateRegister r2
     return $ ["cmp " ++ tr2 ++ ", " ++ tr1, "je " ++ name]
 
-translateQuadruple (QCmpJne (Ident name) r1 r2) = do
+translateQuadruple (QGoToIfNotEqual (Ident name) r1 r2) = do
     tr1 <- translateRegister r1
     tr2 <- translateRegister r2
     return $ ["cmp " ++ tr2 ++ ", " ++ tr1, "jne " ++ name]
 
-translateQuadruple (QCmpJg (Ident name) r1 r2) = do
+translateQuadruple (QGoToIfGreater (Ident name) r1 r2) = do
     tr1 <- translateRegister r1
     tr2 <- translateRegister r2
     return $ ["cmp " ++ tr2 ++ ", " ++ tr1, "jg " ++ name]
 
-translateQuadruple (QCmpJge (Ident name) r1 r2) = do
+translateQuadruple (QGoToIfGreaterEqual (Ident name) r1 r2) = do
     tr1 <- translateRegister r1
     tr2 <- translateRegister r2
     return $ ["cmp " ++ tr2 ++ ", " ++ tr1, "jge " ++ name]
 
-translateQuadruple (QCmpJL (Ident name) r1 r2) = do
+translateQuadruple (QGoToIfLesser (Ident name) r1 r2) = do
     tr1 <- translateRegister r1
     tr2 <- translateRegister r2
     return $ ["cmp " ++ tr2 ++ ", " ++ tr1, "jl " ++ name]
