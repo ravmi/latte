@@ -14,6 +14,11 @@ clean:
 	rm -f ParLatte.hs ParLatte.y LexLatte.x DocLatte.txt
 	rm -f Latte.cf ErrM.hs PrintLatte.hs TestLatte.hs TestLatte
 	rm -f SkelLatte.hs LexLatte.hs AbsLatte.hs
+	rm -f good/*.s
+	rm -f ./*.dyn_hi
+	rm -f ./*.dyn_o
+	rm -f ./src/*.dyn_hi
+	rm -f ./src/*.dyn_o
 
 
 ParLatte.y:	Latte.cf
