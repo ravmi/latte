@@ -1,13 +1,13 @@
 all:	ParLatte.hs latc_x86_64
 	alex -g LexLatte.x
-latc_x86_64:	latc
+latc_x86_64:	lat_to_asm
 	cp src/latc_x86_64 latc_x86_64
 
-latc:
-	ghc --make -isrc src/latte.hs -o latte
+lat_to_asm:
+	ghc --make -isrc src/latte.hs -o lat_to_asm
 	
 clean:
-	rm -f latte latc_x86_64
+	rm -f lat_to_asm latc_x86_64
 	rm -f *.log *.aux *.hi *.o *.dvi
 	rm -f DocLatte.ps
 	rm -f src/*.hi src/*.o
