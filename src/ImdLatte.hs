@@ -14,6 +14,9 @@ import Data.Label hiding (get)
 import Prelude hiding ((.), id)
 import qualified Data.Label as L
 
+import System.Exit ( exitFailure, exitSuccess )
+import System.IO
+
 
 import Control.Monad.Identity
 import Control.Monad.Except
@@ -91,7 +94,7 @@ type BasicBlock = [Quadruple]
 
 data Quad = Quad Op Int Int Int
     deriving (Eq, Ord, Show, Read)
-data Op = Add | Mul | Store | Load
+data Op = Add | Mul | Load
     deriving (Eq, Ord, Show, Read)
 
 data Reg = Rax | Rbx | Rcx | Rdx
@@ -102,8 +105,10 @@ data Location = LocReg Reg | LocVar Int
     deriving (Eq, Ord, Show, Read)
 
 
+allRegisters = [Rax, Rbx, Rcx, Rdx]
+
 -- preprocessing function, calculates next uses of each quadruple argument
-nextUses :: [Quad] -> [Int] -> [(Quad, (Map.Map Int (Maybe Int)))]
+nextUses :: [Quad] -> [Int] -> [(Quad, (Map.Map Int Int))]
 nextUses quads aliveBlockEnd = reverse $ nextUsesRev nextUsesMap revQuads where
     revQuads = reverse $ zip [1..] quads
     quadsLen = length quads
@@ -111,18 +116,58 @@ nextUses quads aliveBlockEnd = reverse $ nextUsesRev nextUsesMap revQuads where
 
 nextUsesRev nextUsesMap [] = []
 nextUsesRev nextUsesMap ((i, (Quad op x y z)):t1) = (((Quad op x y z), nextUses):t2) where
-    rx = Map.lookup x nextUsesMap
-    ry = Map.lookup y nextUsesMap
-    rz = Map.lookup z nextUsesMap
-    nextUses = Map.fromList [(x, rx), (y, ry), (z, rz)]
+    nextUses = Map.filterWithKey (\_ -> flip elem [x, y, z]) nextUsesMap
     m1 = (Map.delete x nextUsesMap)
     m2 = Map.insert y i m1
     newMap = Map.insert z i m2
     t2 = nextUsesRev newMap t1
 
-
+type LineNumber = Int
 type Var = Int
+type NextUsesMap = Map.Map Var LineNumber
+
+
+compose x [] = x
+compose x (y:ys) = compose (y x) ys
+
+
+---------------------------------------------------
+----- functions calculating next uses of quadruples
+-------------------------------------------------------
+
+-- Updates map of next uses to its state from before quadruple
+nextUsesBeforeQuad :: NextUsesMap -> LineNumber -> Quad -> NextUsesMap
+nextUsesBeforeQuad nextUses lineNum (Quad _ x y z) = result where
+    operations = [Map.delete x, Map.insert y lineNum, Map.insert z lineNum]
+    result = compose nextUses operations
+
+--- helper function, takes reveresd list with line numbers and returns for each quadruple information about next uses of
+--- its variables
+revNextUsesList :: [(LineNumber, Quad)] -> NextUsesMap -> [NextUsesMap]
+revNextUsesList [] nextUses = [nextUses]
+revNextUsesList ((lineNum, q@(Quad _ x y z)):t) nextUses = result where
+    nextUsesBefore = nextUsesBeforeQuad nextUses lineNum q
+    filterXYZ k val = elem k [x, y, z]
+    result = (Map.filterWithKey filterXYZ nextUses):(revNextUsesList t nextUsesBefore)
+
+-- appends next uses to each line and returns variable alive at the beginning of the block
+appendNextUses :: [Quad] -> [Var] -> ([(Quad, NextUsesMap)], [Var])
+appendNextUses quads aliveBlockEnd = result where
+    numberedReversed = reverse $ zip [1..] quads
+    countQuads = length quads
+    nextUsesAtTheEnd = Map.fromList $ zip aliveBlockEnd (repeat (countQuads + 1))
+    revNextResult = reverse $ revNextUsesList numberedReversed nextUsesAtTheEnd
+    aliveStart = Map.keys $ head revNextResult
+    quadsWithUses = zip quads (tail revNextResult)
+    result = (quadsWithUses, aliveStart)
+-----------------------------
+--------------------------------------------------
+--------------------------------------------------
+
+
+
 type NextUse = Int
+type MemoryLocation = Int
 
 data ProgState = ProgState { _addressDesc :: Map.Map Int (Set.Set Location)
                  , _registerDesc :: Map.Map Reg (Set.Set Var)
@@ -132,6 +177,7 @@ data ProgState = ProgState { _addressDesc :: Map.Map Int (Set.Set Location)
                  , _tmps :: Int
                  , _firstFree :: Int
                  , _nextUseInfo :: Map.Map Var NextUse
+                 , _varLocations :: Map.Map Var MemoryLocation
                  }
                  deriving (Eq, Ord, Show, Read)
 mkLabels [''ProgState]
@@ -220,14 +266,28 @@ registerDescInsert register var = do
         Nothing -> error "Fatal"
 
 
-getEmptyRegister = do
-    rdesc <- lgets registerDesc
-    freeRegs <- return $ Map.keys (Map.filter ((0==) . length) rdesc)
-    case (length freeRegs) == 0 of
-        True -> spillRegister
-        False -> do
-            update registerDesc (Map.insert (head freeRegs) Set.empty rdesc)
-            return $ head freeRegs
+--getEmptyRegister = do
+--    rdesc <- lgets registerDesc
+--    freeRegs <- return $ Map.keys (Map.filter ((0==) . length) rdesc)
+--    case (length freeRegs) == 0 of
+--        True -> spillRegister
+--        False -> do
+--            update registerDesc (Map.insert (head freeRegs) Set.empty rdesc)
+--            return $ head freeRegs
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 -- it assumes that register holds some vars
@@ -255,16 +315,32 @@ furthestBusyRegister = do
         allPairsWithFurthestLine = filter ((furthestLine==) . snd) regsWithLines in
         return $ fst (head allPairsWithFurthestLine)
 
-spillRegister :: Eval Reg
-spillRegister = do
-    rdesc <- lgets registerDesc
-    adesc <- lgets addressDesc
-    reg <- furthestBusyRegister
-    mapM_ copyToMemory (map fst (filter isDirty (Map.toList adesc)))
-    registerDescRemove reg
-    return reg
+
+
+
+
+
+
+
+
+
+--spillRegister :: Eval Reg
+--spillRegister = do
+--    rdesc <- lgets registerDesc
+--    adesc <- lgets addressDesc
+--    reg <- furthestBusyRegister
+--    mapM_ copyToMemory (map fst (filter isDirty (Map.toList adesc)))
+--    registerDescRemove reg
+--    return reg
 
 isDirty (var, set) = not $ elem (LocVar var) set
+
+
+
+
+
+
+
 
 copyToMemory u = do
     new <- lgets firstFree
@@ -274,42 +350,141 @@ copyToMemory u = do
     addressDescInsert u (LocVar u)
 
 
--- gives all the registers that hold only one variable y
-getExclusiveRegs :: Int -> Eval [Reg]
-getExclusiveRegs y = do
+
+
+
+
+-----------------------------------
+whereInMemory :: Var -> Eval MemoryLocation
+whereInMemory var = do
+    varLocs <- lgets varLocations
+    case Map.lookup var of
+        Just loc -> return loc
+        Nothing -> do
+            fl <- lgets firstFree
+            update firstFree (fl+1)
+            return fl
+
+
+varDirty :: Var -> Eval Bool
+varDirty var = do
+    adesc <- lgets addressDesc
+    case Map.lookup var adesc of
+        Just s -> return $ elem var s
+        Nothing -> error "wrong var"
+
+
+--helper, assumes that var is in reg. It makes sure that var is in it's position in memory. reg will hold everything that
+-- was in ver's memory positon
+saveVarToMemory :: Reg -> Var -> Eval ()
+saveVarToMemory reg var = do
+    adesc <- lgets addressDesc
     rdesc <- lgets registerDesc
+    emit $ PushMem (whereInMemory var)
+    emit $ Store reg (whereInMemory var)
+    emit $ PopReg reg
+    update addressDesc (replaceInAllSets (LocVar var) (LocReg reg) adesc)
     let
-        filterSingleton y set = set == (Set.singleton y)
-        filtered = filter ((filterSingleton y) . snd) (Map.toList rdesc) in
-        return $ map fst filtered
+        filterFun k v = (elem var v)
+        varsHeldByReg = Set.fromList $ Map.keys (Map.filter filterFun adesc) in
+        update registerDesc (Map.insert reg varsHeldByReg rdesc)
 
 
-giveRegister :: Quad -> (Map.Map Int Int) -> Eval Reg
-giveRegister (Quad _ x y z) nextUses = do
+spillReg :: Reg -> Eval ()
+spillReg reg = do
+    rdesc <- lgets addressDesc
+    case Map.lookup reg rdesc of
+        Just heldVars -> do
+            varsToSave <- filterM varDirty (Set.toList heldVars)
+            case varsToSave of
+                (h:t) -> do
+                    saveVarToMemory reg h
+                    spillReg reg
+                [] -> return ()
+            mapM_ (saveVarToMemory reg) varsToSave
+        Nothing -> return ()
+
+-----------------------
+---------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+---------------------------------------------------
+---------------------------------------------------
+---------------------------------------------------
+findExclusiveRegister :: Var -> Eval (Maybe Reg)
+findExclusiveRegister var = do
+    rdesc <- lgets registerDesc
+    adesc <- lgets addressDesc
+    let
+        filterFun key val = (elem key (Map.keys rdesc)) && (val == (Set.singleton var))
+        registersHoldingOnlyVar = Map.keys $ Map.filterWithKey filterFun rdesc in
+        case registersHoldingOnlyVar of
+            (reg:_) -> reg
+            [] -> Nothing
+
+--- this remove vals from all set values (and also the key if the set turns out empty)
+removeFromAllSets val m = result where
+    deleteElement (Just s) = case Set.null $ Set.delete val s of
+        True -> Nothing
+        False -> Set.delete val s
+    deleteElement Nothing = Nothing
+    result = Map.alter deleteElement m
+
+replaceInAllSets v1 v2 m = result where
+    replaceElement (Just s) = case elem v1 s of
+        True -> compose s [Set.delete v1, Set.insert v2]
+        False -> Just s
+    replaceElement Nothing = Nothing
+    result = Map.alter replaceElement m
+
+
+
+-- If y is in register that holds only one variable and y has no next uses, give the register holding y
+--- if failed, find next free register
+-- if failed spill
+giveReg (Quad op x y z) nextUses = do
     adesc <- lgets addressDesc
     rdesc <- lgets registerDesc
 
-    exclusiveRegs <- getExclusiveRegs y
-    case (exclusiveRegs /= []) && ((Map.lookup y nextUses) == Nothing) of
-        True -> do
-            registerDescRemove $ head exclusiveRegs
-            return $ head exclusiveRegs
-        False -> getEmptyRegister
+    exclusiveReg <- findExclusiveRegister y
+    case (exclusiveReg, Map.lookup y nextUses) of
+        (Just reg, Nothing) -> do
+            update addressDesc (removeFromAllSets reg adesc) -- register still holds value, not sure if it's ok
+            return reg
+        _ -> case intersect (Map.keys rdesc) allRegisters of -- check if there are any free registers
+            (reg:_) -> return reg
+            [] -> do
+                reg <- furthestBusyRegister --TODO fix it, beacause the implemention is old
+                spillReg reg
+                return reg
 
---sprawdz czy dobrze dziala nastepne uzycie (czy jest rzeczywicsie po komendzie, bo cos czuje, ze nie)
 
+------------------------------------
+-----------------------------------
+-------------------------------
 
 emit :: String -> Eval ()
 emit = tell
 
-updateNextUseInfo :: (Map.Map Var NextUse) -> Eval ()
-updateNextUseInfo newInfo = do
+updateNextUses :: (Map.Map Var NextUse) -> Eval ()
+updateNextUses newInfo = do
     oldInfo <- lgets nextUseInfo
     update nextUseInfo (Map.union newInfo oldInfo)
 
 genASM q@(Quad op x y z) nextUses = do
-    updateNextUseInfo nextUses
-    l <- giveRegister q nextUses
+    updateNextUses nextUses
+    l <- giveReg q nextUses
     ypos <- getLoc y
     rholds <- registerHolds l y
     case rholds of
@@ -327,28 +502,45 @@ genASM q@(Quad op x y z) nextUses = do
         True -> return ()
         False -> removeAddressFromAllDesc z
 
---QuadsIntoAsm :: [Quad] -> String = do
---QuadsIntoAsm quads alive
---    where
---        appendNextUses = nextUses quads alive
 
-    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [Reg 1, Reg 2, Reg 3, Reg 4, Reg 5] [] 0 Map.empty) (runProgram tree) of
-    runEval (ProgState Map.empty )
+-- We assume that all t
+-- TODO 1 musi zwrocic liczbe spilled, zeby zaalokowac i zwolnic dodatkowa pamiec
+-- Nie bedziemy zwalniac, te dodatkowo zaalokowane wartosci moga rosnac jak jest duzo blokow
+-- (no ale nie bedzie duzo blokow ofc)
+toAsm wrappedNextUses aliveBlockEnd = do
+    mapM_ (uncurry genASM) wrappedNextUses
 
---- init values here
 
-data ProgState = ProgState { _addressDesc :: Map.Map Int (Set.Set Location)
-                 , _registerDesc :: Map.Map Reg (Set.Set Var)
-                 , _spilled :: Map.Map Int Int
-                 , _args :: Int
-                 , _locals :: Int
-                 , _tmps :: Int
-                 , _firstFree :: Int
-                 , _nextUseInfo :: Map.Map Var NextUse
-                 }
-                 deriving (Eq, Ord, Show, Read)
+-- all living variables mu be in the memory at the end
 
-genInstruction Store reg memLoc = "mov " ++ (show reg) ++ ", " ++ (show memLoc)
+--Map.filterWithKey () where
+--    adesc <- lgets addressDesc
+--    filterDirty k v = (elem k aliveVars) && (not $ k elem v)
+--    varsToSave = Map.filterWithKey filterDirty adesc
+
+
+
+-- trzebaj eszcze zapisac do pamieci ofc
+--required: aliveBlockEnd, args, locals, tmps, quads
+runQuadsToAsm quads args locals tmps aliveBlockEnd =
+    let
+        toPair i = (i, Set.singleton (LocVar i))
+        initAddressDesc = Map.fromList (map toPair aliveBlockEnd)
+        initRegisterDesc = Map.empty
+        initSpilled = Map.empty
+        initArgs = args
+        initLocals = locals
+        initTmps = tmps
+        initfirstFree = args + locals + tmps
+        initNextUseInfo = Map.empty
+        wrapNextUses = nextUses quads aliveBlockEnd
+        evalResult = runEval (ProgState initAddressDesc initRegisterDesc initSpilled initArgs initLocals initTmps initfirstFree initNextUseInfo) (toAsm wrapNextUses aliveBlockEnd) in
+        case evalResult of
+            Right (code, w) -> return $ w
+            Left errMessage -> do hPutStrLn stderr errMessage
+                                  exitFailure
+
+--genInstruction Store reg memLoc = "mov " ++ (show reg) ++ ", " ++ (show memLoc)
 genInstruction Load memLoc reg = "mov " ++ (show memLoc) ++ ", " ++ (show reg)
 
 genInstruction Add memLoc reg = "add" ++ (show memLoc) ++ ", " ++ (show reg)
@@ -356,3 +548,14 @@ genInstruction Add memLoc reg = "add" ++ (show memLoc) ++ ", " ++ (show reg)
 
 test2 = nextUses [Quad Add 5 6 7, Quad Mul 1 2 3, Quad Mul 11 1 13] [5, 1, 2]
 
+quad1 = Quad Add 1 2 3
+quad2 = Quad Add 3 2 4
+quad3 = Quad Add 5 1 2
+quads :: [Quad]
+quads = [quad1, quad2, quad3]
+prepareQuads quads = reverse (zip [1..] quads)
+alQuad :: Map.Map Var LineNumber
+alQuad = Map.fromList [(1, 100), (5, 100)]
+
+
+data ASM = PushMem MemoryLocation | PushReg Reg | Store Reg MemoryLocation | PopReg Reg
