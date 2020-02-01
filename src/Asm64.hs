@@ -28,7 +28,7 @@ import Control.Monad.Reader
 
 type Ev2 = Reader Int
 
-translateRegister :: Register -> Ev2 String
+translateRegister :: QArgument -> Ev2 String
 
 --negative means that it has to be taken from the saved arguments
 translateRegister (Mem i) = do
@@ -200,7 +200,7 @@ translateQuadruple (QCmpIntNe r1 r2) = do
     tr2 <- translateRegister r2
     return $ ["mov $-1, %rdx", "cmpq " ++ tr2 ++ ", " ++ tr1, "movq $0, " ++ tr2, "cmovneq %rdx, " ++ tr2]
 
-pushArgument :: (Register, Int) -> Ev2 [String]
+pushArgument :: (QArgument, Int) -> Ev2 [String]
 pushArgument (r, i) = do
     tr <- translateRegister r
     case i of
@@ -212,7 +212,7 @@ pushArgument (r, i) = do
         6 -> return ["movq " ++ tr ++ ", %r9"]
         _ -> return ["pushq " ++ tr]
 
-popArgument :: (Register, Int) -> Ev2 [String]
+popArgument :: (QArgument, Int) -> Ev2 [String]
 popArgument (r, i) = case i <= 6 of
     True -> return []
     False -> return ["pop %rdi"]

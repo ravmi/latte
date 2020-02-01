@@ -37,7 +37,7 @@ type Location = Int
 -- describes where are the variables located
 type Locations = Map.Map Ident Location
 -- describes what memory looks like (only types for now)
-type Memory = Map.Map Location (Register, Type)
+type Memory = Map.Map Location (QArgument, Type)
 
 -- in current state we want to keep locations of variables, state of the memory,
 -- current free avaliable memory location, location of beginning of the block
@@ -48,7 +48,7 @@ data ProgState = ProgState { _memory :: Memory
                  , _freeLocation :: Location
                  , _expectRetType :: Type
                  , _caughtRetType :: (Type, Bool)
-                 , _freeRegisters :: [Register]
+                 , _freeRegisters :: [QArgument]
                  , _code :: QCode
                  , _freeLabel :: Integer
                  , _functions :: Map.Map Ident Type
@@ -64,28 +64,20 @@ emit q = do
     ProgState memory locs bs fl ert crt fr cd flab funs <- get
     put $ ProgState memory locs bs fl ert crt fr (cd ++ [q]) flab funs
 
---example = ProgState Map.empty Map.empty 0 0 Void (Void, False) 0 [] 0
-
---newReg :: Eval (Register)
---newReg = do
---    ProgState memory locs bs fl ert crt fr cd flab <- get
---    put $ ProgState memory locs bs fl ert crt (fr + 1) cd flab
---    return $ Reg fr
-
-getRegister :: Eval (Register)
+getRegister :: Eval (QArgument)
 getRegister = do
     freeRegs <- lgets freeRegisters
     firstReg <- return $ head freeRegs
     update freeRegisters (tail freeRegs)
     return $ firstReg
 
-putRegister :: Register -> Eval ()
+putRegister :: QArgument -> Eval ()
 putRegister reg = do
     freeRegs <- lgets freeRegisters
     case reg of
         Reg 1 -> update freeRegisters (Reg 1:freeRegs)
         Reg 2 -> update freeRegisters (Reg 2:freeRegs)
-        Reg 3 -> update freeRegisters (Reg 3:freeRegs)
+        Reg 3 -> update freeQArguments (Reg 3:freeRegs)
         _ -> return ()
 
 update :: ProgState :-> a -> a -> Eval ()
@@ -110,7 +102,7 @@ makeLabelQ :: Integer -> Eval Quadruple
 makeLabelQ i = do
     return $ QLab (Ident ("L" ++ (show i)))
 
-insertMemory :: Location -> (Register, Type) -> Eval ()
+insertMemory :: Location -> (QArgument, Type) -> Eval ()
 insertMemory key val = do
     mem <- lgets memory
     update memory (Map.insert key val mem)
@@ -161,7 +153,7 @@ allocateVar varName varType = do
     update freeLocation (freeLoc + 1)
     return freeLoc
 
-lookupVar :: Ident -> Eval (Register, Type)
+lookupVar :: Ident -> Eval (QArgument, Type)
 lookupVar name = do
     locs <- lgets locations
     mem <- lgets memory
@@ -178,7 +170,7 @@ lookupFunction name = do
         Just fun -> return fun
         _ -> throwError $ varUninitialized name
 
-getLoc :: Ident -> Eval (Register)
+getLoc :: Ident -> Eval (QArgument)
 getLoc name = do
     locs <- lgets locations
     mem <- lgets memory
@@ -186,7 +178,7 @@ getLoc name = do
         Just location -> return $ Mem location
         _ -> throwError $ varUninitialized name
 
-copyToRegister :: Register -> Eval Register
+copyToRegister :: QArgument -> Eval QArgument
 copyToRegister pos = do
     freeReg <- getRegister
     case pos of
@@ -199,10 +191,10 @@ copyToRegister pos = do
         _ -> do putRegister freeReg
                 return pos
 
-pairsToLists :: [(Register, Type)] -> ([Register], [Type])
+pairsToLists :: [(QArgument, Type)] -> ([QArgument], [Type])
 pairsToLists pairs = (map fst pairs, map snd pairs)
 
-translateExpression :: Expr -> Eval (Register, Type)
+translateExpression :: Expr -> Eval (QArgument, Type)
 translateExpression (EVar name) = lookupVar name
 translateExpression (ELitInt i) = return (RegInt i, Int)
 translateExpression (ELitTrue) = return (RegBool True, Bool)
