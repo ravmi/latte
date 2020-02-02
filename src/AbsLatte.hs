@@ -59,3 +59,5 @@ data MulOp = Times | Div | Mod
 
 data RelOp = LTH | LE | GTH | GE | EQU | NE
   deriving (Eq, Ord, Show, Read)
+
+

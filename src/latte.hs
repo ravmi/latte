@@ -29,23 +29,23 @@ import SkelLatte
 import PrintLatte
 import AbsLatte
 import ErrM
-import ImdLatte
+
+import QuadData
 
 
-
-type Location = Int
+type Loc = Int
 -- describes where are the variables located
-type Locations = Map.Map Ident Location
+type Locations = Map.Map Ident Loc
 -- describes what memory looks like (only types for now)
-type Memory = Map.Map Location (QArgument, Type)
+type Memory = Map.Map Loc (QArgument, Type)
 
 -- in current state we want to keep locations of variables, state of the memory,
 -- current free avaliable memory location, location of beginning of the block
 -- and expected return type
 data ProgState = ProgState { _memory :: Memory
                  , _locations :: Locations
-                 , _blockStart :: Location
-                 , _freeLocation :: Location
+                 , _blockStart :: Loc
+                 , _freeLocation :: Loc
                  , _expectRetType :: Type
                  , _caughtRetType :: (Type, Bool)
                  , _freeRegisters :: [QArgument]
@@ -77,7 +77,7 @@ putRegister reg = do
     case reg of
         Reg 1 -> update freeRegisters (Reg 1:freeRegs)
         Reg 2 -> update freeRegisters (Reg 2:freeRegs)
-        Reg 3 -> update freeQArguments (Reg 3:freeRegs)
+        Reg 3 -> update freeRegisters (Reg 3:freeRegs)
         _ -> return ()
 
 update :: ProgState :-> a -> a -> Eval ()
@@ -102,12 +102,12 @@ makeLabelQ :: Integer -> Eval Quadruple
 makeLabelQ i = do
     return $ QLab (Ident ("L" ++ (show i)))
 
-insertMemory :: Location -> (QArgument, Type) -> Eval ()
+insertMemory :: Loc -> (QArgument, Type) -> Eval ()
 insertMemory key val = do
     mem <- lgets memory
     update memory (Map.insert key val mem)
 
-insertLocations :: Ident -> Location -> Eval ()
+insertLocations :: Ident -> Loc -> Eval ()
 insertLocations key val = do
     locs <- lgets locations
     update locations (Map.insert key val locs)

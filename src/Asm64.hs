@@ -24,6 +24,8 @@ import AbsLatte
 import ErrM
 import ImdLatte
 import Control.Monad.Reader
+
+import QuadData
 --rdx, rsi, rsi, rdx <- better don't use it yet
 
 type Ev2 = Reader Int
