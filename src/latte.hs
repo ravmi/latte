@@ -1,7 +1,6 @@
 {-# LANGUAGE TemplateHaskell, TypeOperators #-}
 module Main where
 
-import Asm64
 
 import Control.Category
 import Data.Label hiding (get)
@@ -39,6 +38,8 @@ type Locations = Map.Map Ident Loc
 -- describes what memory looks like (only types for now)
 type Memory = Map.Map Loc (QArgument, Type)
 
+type StaticValue = String
+
 -- in current state we want to keep locations of variables, state of the memory,
 -- current free avaliable memory location, location of beginning of the block
 -- and expected return type
@@ -48,10 +49,11 @@ data ProgState = ProgState { _memory :: Memory
                  , _freeLocation :: Loc
                  , _expectRetType :: Type
                  , _caughtRetType :: (Type, Bool)
-                 , _freeRegisters :: [QArgument]
-                 , _code :: QCode
+                 , _code :: [Quad]
                  , _freeLabel :: Integer
                  , _functions :: Map.Map Ident Type
+                 , _staticMemory :: Map.Map Int String
+                 , _staticFirstFree :: Int
                  }
                  deriving (Eq, Ord, Show, Read)
 mkLabels [''ProgState]
@@ -59,26 +61,32 @@ mkLabels [''ProgState]
 type Eval ev = StateT ProgState (WriterT String (ExceptT String Identity)) ev
 runEval mem ev = runIdentity $ runExceptT (runWriterT (evalStateT ev mem))
 
-emit :: Quadruple -> Eval ()
+preserveMemory :: Eval a -> Eval a
+preserveMemory ev = do
+    mem <- lgets memory
+    locs <- lgets locations
+    bstart <- lgets blockStart
+    floc <- lgets freeLocation
+    ret <- ev
+    update memory mem
+    update locations locs
+    update blockStart bstart
+    update freeLocation floc
+    return ret
+
+allocStatic :: String -> Eval (Int)
+allocStatic str = do
+    sFree <- lgets staticFirstFree
+    sMem <- lgets staticMemory
+    update staticMemory (Map.insert sFree (str ++ "\n") sMem)
+    update staticFirstFree (sFree + (length str + 1))
+    return sFree
+
+
+emit :: Quad -> Eval ()
 emit q = do
-    ProgState memory locs bs fl ert crt fr cd flab funs <- get
-    put $ ProgState memory locs bs fl ert crt fr (cd ++ [q]) flab funs
-
-getRegister :: Eval (QArgument)
-getRegister = do
-    freeRegs <- lgets freeRegisters
-    firstReg <- return $ head freeRegs
-    update freeRegisters (tail freeRegs)
-    return $ firstReg
-
-putRegister :: QArgument -> Eval ()
-putRegister reg = do
-    freeRegs <- lgets freeRegisters
-    case reg of
-        Reg 1 -> update freeRegisters (Reg 1:freeRegs)
-        Reg 2 -> update freeRegisters (Reg 2:freeRegs)
-        Reg 3 -> update freeRegisters (Reg 3:freeRegs)
-        _ -> return ()
+    cd <- lgets code
+    update code (cd ++ [q])
 
 update :: ProgState :-> a -> a -> Eval ()
 update fun val = do
@@ -98,9 +106,8 @@ makeLabelN :: Integer -> Eval Ident
 makeLabelN i = do
     return $ Ident (".L" ++ (show i))
 
-makeLabelQ :: Integer -> Eval Quadruple
-makeLabelQ i = do
-    return $ QLab (Ident ("L" ++ (show i)))
+makeLabelQ :: Integer -> Eval Quad
+makeLabelQ i = return $ QuadNoAssign (OpLabel ("L" ++ (show i))) QaEmpty QaEmpty
 
 insertMemory :: Loc -> (QArgument, Type) -> Eval ()
 insertMemory key val = do
@@ -114,18 +121,12 @@ insertLocations key val = do
 
 clearMemory :: Eval ()
 clearMemory = do
-    ProgState memory locs bs fl ert crt fr cd flab funs <- get
-    put $ ProgState Map.empty Map.empty 0 0 ert crt fr cd flab funs
+    update memory Map.empty
+    update locations Map.empty
+    update blockStart 0
+    update freeLocation 0
 
 
--- this allows to run block without affecting environment outside of the block.
-preserveState :: Eval a -> Eval a
-preserveState p = do
-    ProgState memory1 locs1 bs1 fl1 ert1 crt1 fr1 cd1 flab1 funs1 <- get
-    x <- p
-    ProgState memory2 locs2 bs2 fl2 ert2 crt2 fr2 cd2 flab2 funs2 <- get
-    put $ ProgState memory1 locs1 bs1 fl1 ert1 crt1 fr1 cd2 flab2 funs2
-    return x
 
 --preserve :: Eval a -> (ProgState -> b) -> Eval a
 --preserve eval getter = do
@@ -148,11 +149,13 @@ allocateVar :: Ident -> Type -> Eval Int
 allocateVar varName varType = do
     freeLoc <- lgets freeLocation
     locs <- lgets locations
-    insertMemory freeLoc (Mem freeLoc, varType)
+    insertMemory freeLoc (QaVar freeLoc, varType)
     insertLocations varName freeLoc
     update freeLocation (freeLoc + 1)
     return freeLoc
 
+
+----- OK
 lookupVar :: Ident -> Eval (QArgument, Type)
 lookupVar name = do
     locs <- lgets locations
@@ -170,149 +173,143 @@ lookupFunction name = do
         Just fun -> return fun
         _ -> throwError $ varUninitialized name
 
-getLoc :: Ident -> Eval (QArgument)
-getLoc name = do
-    locs <- lgets locations
-    mem <- lgets memory
-    case Map.lookup name locs of
-        Just location -> return $ Mem location
-        _ -> throwError $ varUninitialized name
-
-copyToRegister :: QArgument -> Eval QArgument
-copyToRegister pos = do
-    freeReg <- getRegister
-    case pos of
-        Mem i -> do emit $ QLoad pos freeReg
-                    return freeReg
-        RegInt i ->  do emit $ QLoad pos freeReg
-                        return freeReg
-        RegBool b -> do emit $ QLoad pos freeReg
-                        return freeReg
-        _ -> do putRegister freeReg
-                return pos
 
 pairsToLists :: [(QArgument, Type)] -> ([QArgument], [Type])
 pairsToLists pairs = (map fst pairs, map snd pairs)
 
+
+nextFreeLocation :: Eval (Var)
+nextFreeLocation = do
+    nfl <- lgets freeLocation
+    update freeLocation (nfl+1)
+    return nfl
+
+
 translateExpression :: Expr -> Eval (QArgument, Type)
 translateExpression (EVar name) = lookupVar name
-translateExpression (ELitInt i) = return (RegInt i, Int)
-translateExpression (ELitTrue) = return (RegBool True, Bool)
-translateExpression (ELitFalse) = return (RegBool False, Bool)
+translateExpression (ELitInt i) = return (QaConst (fromIntegral i), Int)
+translateExpression (ELitTrue) = return (QaConst 1, Bool)
+translateExpression (ELitFalse) = return (QaConst 0, Bool)
+
+---
 translateExpression (EApp funName funArgs) = do
+    newVar <- nextFreeLocation
     Fun expectedRet expectedArgTypes  <- lookupFunction funName
     results <- mapM translateExpression funArgs
-    (regs, argTypes) <- return $ pairsToLists results
+    (resultArgs, argTypes) <- return $ pairsToLists results
     when (argTypes /= expectedArgTypes)
        (throwError $ badApply funName expectedArgTypes argTypes)
-    emit $ QCall funName regs
-    mapM_ putRegister regs
-    -- @TODO realloc registers
-    nReg <- getRegister
-    return (nReg, expectedRet)
+    case funName of
+        Ident strName -> emit $ Quad4 newVar (OpCall strName) (QaList resultArgs) QaEmpty
+    return (QaVar newVar, expectedRet)
 
+---TODO allocate stateic
 translateExpression (EString str) = do
-    nReg <- getRegister
-    emit $ QAlloc nReg (length str)
-    return $ (nReg, Str)
+    newVar <- nextFreeLocation
+    sMem <- allocStatic str
+    emit $ Quad4 newVar OpCall (QaList [sMem]) QaEmpty
+    return $ (QaVar newVar, Str)
 
+--- OK
 translateExpression (Neg expr) = do
-    (r, t) <- translateExpression expr
+    newVar <- nextFreeLocation
+    (expVar, t) <- translateExpression expr
     when (t /= Bool)
         (throwError $ badTypesSuggestion "`-`" Int t)
-    emit $ QNeg r
-    return (r, Int)
+    emit $ Quad4 newVar OpNeg expVar QaEmpty
+    return (QaVar newVar, Int)
 
+--OK
 translateExpression (Not expr) = do
-    (r, t) <- translateExpression expr
+    newVar <- nextFreeLocation
+    (expVar, t) <- translateExpression expr
     when (t /= Bool)
         (throwError $ badTypesSuggestion "`!`" Bool t)
-    emit $ QNot r
-    return (r, Bool)
+    emit $ Quad4 newVar OpNot expVar QaEmpty
+    return (QaVar newVar, Bool)
 
 -- static calculation stuff can be added here (both const, one const etc)
 translateExpression (EMul e1 op e2) = do
+    newVar <- nextFreeLocation
     (r1, t1) <- translateExpression e1
     (r2, t2) <- translateExpression e2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypesSuggestion "`*`" [Int, Int] [t1, t2])
-    r2 <- copyToRegister r2
     case op of
-        Times -> emit $ QMul r1 r2
-        Mod -> emit $ QMod r1 r2
-        Div -> emit $ QDiv r1 r2
-    putRegister r1
-    return (r2, t1)
+        Times -> emit $ Quad4 newVar OpMul r1 r2
+        Mod -> emit $ Quad4 newVar OpMod r1 r2
+        Div -> emit $ Quad4 newVar OpDiv r1 r2
+    return (QaVar newVar, t1)
 
 translateExpression (EAdd exp1 Plus exp2) = do
+    newVar <- nextFreeLocation
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
     when(t1 /= t2 || (t1 /= Str && t1 /= Int))
         (throwError $ badTypes "`+`" [t1, t2])
-    r2 <- copyToRegister r2
     case t1 of
-        Int -> do emit $ QAdd r1 r2
-                  putRegister r1
-                  return (r2, t1)
-        Str -> do emit $ QConcat r1 r2
-                  putRegister r1
-                  return (r2, t1)
+        Int -> do emit $ Quad4 newVar OpAdd r1 r2
+        Str -> do emit $ Quad4 newVar (OpCall "concatStrings") (QaList [r1, r2]) QaEmpty
+    return (QaVar newVar, t1)
 
 translateExpression (EAdd exp1 Minus exp2) = do
+    newVar <- nextFreeLocation
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypes "`+`" [t1, t2])
-    r1 <- copyToRegister r1
-    emit $ QSub r2 r1
-    putRegister r2
-    return (r1, t1)
+    emit $ Quad4 newVar OpSub r1 r2
+    return (QaVar newVar, t1)
 
 translateExpression (ERel exp1 EQU exp2) = do
+    newVar <- nextFreeLocation
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
     when ((t1 /= t2) || (t1 /= Int && t1 /= Str && t1 /= Bool))
         (throwError $ badTypes "`==`" [t1, t2])
-    r2 <- copyToRegister r2
-    emit $ QCmpIntEq r1 r2
-    putRegister r1
-    return (r2, Bool)
+    emit $ Quad4 newVar OpCmpIntEq r1 r2
+    return (QaVar newVar, Bool)
 
 translateExpression (ERel exp1 op exp2) = do
+    newVar <- nextFreeLocation
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypesSuggestion "comparison operator" [Int, Int] [t1, t2])
-    r2 <- copyToRegister r2
     case op of
-        LTH -> do emit $ QCmpIntLt r1 r2
-        LE -> do  emit $ QCmpIntLe r1 r2
-        GTH -> emit $ QCmpIntGt r1 r2
-        GE -> do emit $ QCmpIntGe r1 r2
-        EQU -> do emit $ QCmpIntEq r1 r2
-        NE -> emit $ QCmpIntNe r1 r2
-    putRegister r1
-    return (r2, Bool)
+        LTH -> do emit $ Quad4 newVar OpCmpIntLt r1 r2
+        LE -> do  emit $ Quad4 newVar OpCmpIntLe r1 r2
+        GTH -> emit $ Quad4 newVar OpCmpIntGt r1 r2
+        GE -> do emit $ Quad4 newVar OpCmpIntGe r1 r2
+        EQU -> do emit $ Quad4 newVar OpCmpIntEq r1 r2
+        NE -> emit $ Quad4 newVar OpCmpIntNe r1 r2
+    return (QaVar newVar, Bool)
 
 translateExpression (EAnd exp1 exp2) = do
+    newVar <- nextFreeLocation
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
     when (t1 /= Bool || t2 /= Bool)
         (throwError $ badTypesSuggestion "&&" [Bool, Bool] [t1, t2])
-    r2 <- copyToRegister r2
-    emit $ QAnd r1 r2
-    putRegister r1
-    return (r2, Bool)
+    emit $ Quad4 newVar OpAnd r1 r2
+    return (QaVar newVar, Bool)
 
 translateExpression (EOr exp1 exp2) = do
+    newVar <- nextFreeLocation
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
     when (t1 /= Bool || t2 /= Bool)
         (throwError $ badTypesSuggestion "||" [Bool, Bool] [t1, t2])
-    r2 <- copyToRegister r2
-    emit $ QOr r1 r2
-    putRegister r1
-    return (r2, Bool)
+    emit $ Quad4 newVar OpOr r1 r2
+    return (QaVar newVar, Bool)
+
+
+
+
+
+
+
+
 
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
@@ -339,42 +336,49 @@ declareItem expectedType (Init varName expr) = do
     (r1, t1) <- translateExpression expr
     when (t1 /= expectedType)
         (throwError $ badTypesSuggestion "assignment" expectedType t1)
-    r1 <- copyToRegister r1
+    --r1 <- copyToRegister r1
     loc <- declare varName t1
-    emit $ QAss r1 (Mem loc)
-    putRegister r1
+    emit $ Quad4 loc OpAss r1 QaEmpty
+    --putRegister r1
+
+
+
+
+
+
+
+
 
 runStmt :: Stmt -> Eval ()
 runStmt Empty = return ()
 
-runStmt (BStmt block) = do
-    ret <- preserveState $ catchRet (runBlock block)
-    update caughtRetType ret
 
+---TODO
+runStmt (BStmt block) = preserveMemory $ runBlock block
+    --ret <- preserveState $ catchRet (runBlock block)
+    --update caughtRetType ret
+
+---TODO
 runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
+
 runStmt (Ass varName expr) = do
     (r1, t1) <- translateExpression expr
     (r2, t2) <- translateExpression (EVar varName)
     when (t1 /= t2)
         (throwError $ badTypesSuggestion "assignment" t2 t1)
-    r1 <- copyToRegister r1
-    emit $ QAss r1 r2
-    putRegister r1
-
+    emit $ Quad4 r2 OpAss r1 QaEmpty
 
 runStmt (Incr varName) = do
     (r1, t1) <- translateExpression (EVar varName)
     when (t1 /= Int)
         (throwError $ badTypesSuggestion "++" Int t1)
-    l1 <- getLoc varName
-    emit $ QInc l1
+    emit $ Quad4 r1 OpAdd r1 (QaConst 1)
 
 runStmt (Decr varName) = do
     (r1, t1) <- translateExpression (EVar varName)
     when (t1 /= Int)
         (throwError $ badTypesSuggestion "--" Int t1)
-    l1 <- getLoc varName
-    emit $ QDec l1
+    emit $ Quad4 r1 OpSub r1 (QaConst 1)
 
 runStmt (Ret expr) = do
     (r1, t1) <- translateExpression expr
@@ -382,14 +386,14 @@ runStmt (Ret expr) = do
     when (t1 /= expectedType)
         (throwError $ badTypesSuggestion "return statement" expectedType t1)
     update caughtRetType (t1, True)
-    emit $ QRet r1
+    emit $ Quad4 0 OpRet r1 QaEmpty
 
 runStmt (VRet) = do
     expectedType <- lgets expectRetType
     when (expectedType /= Void)
         (throwError $ badTypesSuggestion "return statement" expectedType Void)
     update caughtRetType (Void, True)
-    emit $ QRetV
+    emit $ Quad4 0 OpRet QaEmpty QaEmpty
 
 runStmt (Cond ELitTrue stmt) = runStmt stmt
 
@@ -400,11 +404,11 @@ runStmt (Cond expr stmt) = do
     lname1 <- newLabel
     lName <- makeLabelN lname1
     lQuad <- makeLabelQ lname1
-    emit $ QGoToIfNotEqual lName r1 (RegInt (-1))
+    emit $ QuadNoAssign (OpGoToIfFalse lName) r1 QaEmpty
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
     catchRet $ runStmt stmt
-    emit lQuad
+    emit $ QuadNoAssign (OpLabel lQuad) QaEmpty QaEmpty
     return ()
 
 runStmt (CondElse ELitTrue stmt1 stmt2) = do
@@ -424,15 +428,15 @@ runStmt (CondElse expr stmt1 stmt2) = do
     lQuad1 <- makeLabelQ lname1
     lName2 <- makeLabelN lname2
     lQuad2 <- makeLabelQ lname2
-    emit $ QGoToIfNotEqual lName1 r1 (RegInt (-1))
+    emit $ QuadNoAssign (OpGoToIfFalse lName1) r1 QaEmpty
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "condition statement" Bool t1)
     (_, oldWasCaught) <- lgets caughtRetType
     (ret1, wasCaught1) <- catchRet $ runStmt stmt1
-    emit $ QJmp lName2
-    emit $ lQuad1
+    emit $ QuadNoAssign (OpJmp lName2) QaEmpty QaEmpty
+    emit $ QuadNoAssign (OpLabel lQuad1) QaEmpty QaEmpty
     (ret2, wasCaught2) <- catchRet $ runStmt stmt2
-    emit $ lQuad2
+    emit $ QuadNoAssign (OpLabel lQuad2) QaEmpty QaEmpty
     when (not oldWasCaught && wasCaught1 && wasCaught2 && (ret1 == ret2))
         (update caughtRetType (ret1, True))
 
@@ -443,22 +447,25 @@ runStmt (While expr stmt) = do
     lQuad1 <- makeLabelQ lname1
     lName2 <- makeLabelN lname2
     lQuad2 <- makeLabelQ lname2
-    emit lQuad1
+    emit $ QuadNoAssign (OpLabel lQuad1) QaEmpty QaEmpty
     (r1, t1) <- translateExpression expr
-    emit $ QGoToIfNotEqual lName2 r1 (RegInt (-1))
-    putRegister r1
+    emit $ QuadNoAssign (OpGoToIfFalse lName2) r1 QaEmpty
     when (t1 /= Bool)
         (throwError $ badTypesSuggestion "while statement" Bool t1)
     (retOld, oldWasCaught) <- lgets caughtRetType
     (newRet, newWasCaught) <- catchRet $ runStmt stmt
     when ((not oldWasCaught) && newWasCaught)
         (update caughtRetType (newRet, True))
-    emit $ QJmp lName1
-    emit lQuad2
+    emit $ QuadNoAssign (OpJmp lName1) QaEmpty QaEmpty
+    emit $ QuadNoAssign (OpLabel lQuad2) QaEmpty QaEmpty
 
 runStmt (SExp expr) = do
     translateExpression expr
     return ()
+
+
+
+
 
 
 
@@ -513,7 +520,7 @@ modifyState getter ev = do
     update getter val
     return ret
 
-flushCode :: Eval ([Quadruple])
+flushCode :: Eval ([Quad])
 flushCode = do
     c <- lgets code
     update code []
@@ -523,11 +530,14 @@ defineFun :: TopDef -> Eval (QBlock)
 defineFun (FnDef retType funName arguments block) = do
     argNames <- getArgNames arguments
     argTypes <- getArgTypes arguments
+    update freeLocation 1
     update expectRetType retType
-    update freeLocation (negate (length argNames))
+    --update freeLocation (negate (length argNames))
     mapM_ (uncurry declare) (reverse $ zip argNames argTypes)
-    update freeLocation 0
-    (caughtRet, _) <- catchRet $ runBlock block
+    --update freeLocation 0
+    preserveMemory $ runBlock block
+    (caughtRet, _) <- lgets caughtRetType
+    update caughtRetType (Void, False)
     when (caughtRet /= retType)
         (throwError $ badReturn funName retType)
     c <- flushCode
@@ -542,14 +552,13 @@ declareNativeFunctions = do
     insertFunction "readString" (Fun Str [])
     return ()
 
-runProgram :: Program -> Eval [QBlock]
+runProgram :: Program -> Eval ([QBlock], Map.Map Int String)
 runProgram (Program defList) = do
     declareNativeFunctions
     mapM_ declareFun defList
-    freeLoc <- lgets freeLocation
-    update blockStart freeLoc
-    clearMemory
-    mapM (preserveState . defineFun) defList
+    qBlocks <- mapM defineFun defList
+    staticM <- lgets staticMemory
+    return (qBlocks, staticM)
 
 runText :: String -> IO [QBlock]
 runText s = let ts = myLexer s in case pProgram ts of
@@ -557,8 +566,8 @@ runText s = let ts = myLexer s in case pProgram ts of
                 hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
-    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [Reg 1, Reg 2, Reg 3, Reg 4, Reg 5] [] 0 Map.empty) (runProgram tree) of
-        Right (code, w) -> return $ code
+    Ok tree -> case runEval (ProgState Map.empty Map.empty 0 0 Void (Void, False) [] 0 Map.empty) (runProgram tree) of
+        Right ((code, static), w) -> return $ code
         Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
 
@@ -572,13 +581,15 @@ getDir path = intercalate "" dirsNoLast where
     dirsNoLast = take ((length dirs) - 1) dirs
 
 main :: IO ()
-main = do
-    args <- getArgs
-    case args of
-        [s] -> do
-            code <- readFile s
-            quads <- runText code
-            --print quads
-            putStrLn $ "OK"
-            writeFile ((getDir s) ++ "/" ++ (getFilename s) ++ ".s") (translateProgram quads)
-        _ -> hPutStrLn stderr  "Only one argument!"
+main = return
+--main :: IO ()
+--main = do
+--    args <- getArgs
+--    case args of
+--        [s] -> do
+--            code <- readFile s
+--            quads <- runText code
+--            --print quads
+--            putStrLn $ "OK"
+--            writeFile ((getDir s) ++ "/" ++ (getFilename s) ++ ".s") (translateProgram quads)
+--        _ -> hPutStrLn stderr  "Only one argument!"

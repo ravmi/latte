@@ -1,6 +1,6 @@
 module QuadData where
 import AbsLatte
-data QArgument = QaVar Var | QaConst Int
+data QArgument = QaVar Var | QaConst Int | QaEmpty | QaList [QArgument]
 --Reg1 | Reg2 | Reg3 | Reg4 | Reg5
   deriving (Eq, Ord, Show, Read)
 
@@ -49,7 +49,6 @@ data Quadruple
     | QCmpIntEq QArgument QArgument
     | QCmpIntNe QArgument QArgument
 
-
     | QAlloc QArgument Int
     | QConcat QArgument QArgument
 
@@ -89,37 +88,37 @@ data Op
     | OpLab
     | OpJmp
 
-    | OpGoToIfEqual
-    | OpGoToIfNotEqual Ident QArgument QArgument
-    | OpGoToIfGreater Ident QArgument QArgument
-    | OpGoToIfGreaterEqual Ident QArgument QArgument
-    | OpGoToIfLesser Ident QArgument QArgument
-    | OpGoToIfLesserEqual Ident QArgument QArgument
+    | OpGoToIfFalse
 
-    | OpNeg QArgument
-    | OpAnd QArgument QArgument
-    | OpOr QArgument QArgument
-    | OpXor QArgument QArgument
-    | OpNot QArgument
-    | OpSwap QArgument QArgument
+    | OpNeg
+    | OpAnd
+    | OpOr
+    | OpXor
+    | OpNot
+    | OpSwap
 
-    | OpCmpIntLt QArgument QArgument
-    | OpCmpIntLe QArgument QArgument
-    | OpCmpIntGt QArgument QArgument
-    | OpCmpIntGe QArgument QArgument
-    | OpCmpIntEq QArgument QArgument
-    | OpCmpIntNe QArgument QArgument
+    | OpCmpIntLt
+    | OpCmpIntLe
+    | OpCmpIntGt
+    | OpCmpIntGe
+    | OpCmpIntEq
+    | OpCmpIntNe
+
+    | OpLabel String
+
+    | OpCall String
 
 
-    | OpAlloc QArgument Int
-    | OpConcat QArgument QArgument
 
-    | OpCall Ident [QArgument]
-    | OpLoad QArgument QArgument
-    | OpStore QArgument QArgument
+--- dla specjanych komen (assign, funcall) odzielne implementacje
+--- nie wiem jeszcze co dla
+    | OpConcat
+
+    | OpLoad
+    | OpStore
     deriving (Eq, Ord, Show, Read)
 
-data Quad = Quad4 Var Op QArgument QArgument | Quad3 Var Op QArgument | Quad2 Var Op
+data Quad = Quad4 Var Op QArgument QArgument | QuadNoAssign Op QArgument QArgument
     deriving (Eq, Ord, Show, Read)
 
 data Reg = Rax | Rbx | Rcx | Rdx

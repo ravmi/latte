@@ -74,9 +74,11 @@ nextUsesBeforeQuad nextUses lineNum (Quad4 x _ y z) = result where
     op1 = case y of
         QaConst c -> id
         QaVar var -> Map.insert var lineNum
+        QaList l -> id -- TODO upload here
     op2 = case z of
         QaConst c -> id
         QaVar var -> Map.insert var lineNum
+        QaEmpty -> id
     operations = [Map.delete x, op1, op2]
     result = compose nextUses operations
 
@@ -222,6 +224,12 @@ spillReg reg = do
                 [] -> return ()
         Nothing -> return ()
 
+-- TODO
+--saveVarsToMemory :: [Var] -> Eval ()
+--saveVarsToMemory vars = do where
+--    varsToSave <- filterM varDirty (vars)
+
+
 
 
 
@@ -336,6 +344,8 @@ updateVarAfterQuad var = do
             update addressDesc (Map.delete var adesc)
             update registerDesc (removeFromAllSets var rdesc)
 
+
+--special ones: fun, jump, assign,
 --x is var, y may be QaConst Int QaVar Int
 quadToAsm q@(Quad4 x op y z) nextUses = do
     rdesc <- lgets registerDesc
@@ -349,9 +359,13 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                     True -> emit $ ALoad (AAVar vy) (AAReg l)
                     False -> return ()
                 QaConst cy -> return ()
-            zp <- whereVarPreferReg z
-            case (zp, op) of
-                (zarg, OpAdd) -> emit $ AAdd zarg (AAReg l)
+            case z of
+                QaEmpty -> case op of
+                    OpNeg -> emit $ ANeg (AAReg l) -- single arg
+                _ -> do
+                    zp <- whereVarPreferReg z
+                    case (zp, op) of
+                        (zarg, OpAdd) -> emit $ AAdd zarg (AAReg l)
 
             update addressDesc (Map.insert x (Set.singleton (AAReg l)) adesc)
             update registerDesc (compose rdesc [removeFromAllSets x, Map.insert l (Set.singleton x)])
@@ -360,9 +374,8 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                 QaConst cy-> return ()
             case z of
                 QaVar vz -> updateVarAfterQuad vz
-                QaConst cz -> return ()
+                _ -> return ()
         Nothing -> return ()
-
 
 -- We assume that all t
 -- TODO 1 musi zwrocic liczbe spilled, zeby zaalokowac i zwolnic dodatkowa pamiec
@@ -412,7 +425,7 @@ quads = [quad1, quad2, quad3, quad4, quad5]
 --alQuad :: Map.Map Var LineNumber
 --alQuad = Map.fromList [(1, 100), (5, 100)]
 
-data ASM = APush AmdArg | AStore AmdArg AmdArg | APop AmdArg | ALoad AmdArg AmdArg | AAdd AmdArg AmdArg
+data ASM = APush AmdArg | AStore AmdArg AmdArg | APop AmdArg | ALoad AmdArg AmdArg | AAdd AmdArg AmdArg | ANeg AmdArg
                  deriving (Eq, Ord, Show, Read)
 
 ret = runQuadsToAsm quads 200 [1, 4, 7, 10, 13]
