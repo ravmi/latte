@@ -43,7 +43,7 @@ type MemoryLocation = Int
 type LineNumber = Int
 type NextUsesMap = Map.Map Var LineNumber
 
-data QuadProgState = QuadProgState { _addressDesc :: Map.Map Int (Set.Set Reg, Set.Set Var) -- replace this set with two sets/lists
+data QuadProgState = QuadProgState { _addressDesc :: AddressDescriptions -- replace this set with two sets/lists
                  , _registerDesc :: Map.Map Reg (Set.Set Var)
                  , _firstFree :: Int
                  , _nextUseInfo :: Map.Map Var NextUse
@@ -113,6 +113,9 @@ definedInQuad :: Quad -> [Var]
 definedInQuad (Quad4 x _ y z) = [x]
 definedInQuad (QuadNoAssign _ y z) = []
 
+definedInBlock :: [Quad] -> [Var]
+definedInBlock quads = List.nub $ concatMap definedInQuad quads
+
 yAndZ :: Quad -> (QArgument, QArgument)
 yAndZ (Quad4 _ _ y z) = (y, z)
 yAndZ (QuadNoAssign _ y z) = (y, z)
@@ -127,6 +130,7 @@ usedInQuad q = result where
         _ -> []
     result = List.nub $ (usedInName y) ++ (usedInName z)
 
+usedInBlock quads = List.nub $ concatMap usedInQuad quads
 
 
 --- helper function, takes reveresd list with line numbers and returns for each quadruple information about next uses of
@@ -245,10 +249,27 @@ spillReg reg = do
                 [] -> return ()
         Nothing -> return ()
 
--- TODO
---saveVarsToMemory :: [Var] -> Eval ()
---saveVarsToMemory vars = do where
---    varsToSave <- filterM varDirty (vars)
+saveVarsAfterBlock :: [Var] -> Eval ()
+saveVarsAfterBlock vars = do
+    adesc <- lgets addressDesc
+    rdesc <- lgets registerDesc
+    dirtyVars <- filterM varDirty vars
+
+    -- TODO can be improved
+    whereNow <- mapM (whereVarPreferReg . QaVar) dirtyVars
+    whereShould <- mapM whereInMemory dirtyVars
+
+    mapM_ (emit . APush) whereNow
+    mapM_ (emit . APop) (reverse whereShould)
+
+    let
+        sets = zip (repeat Set.empty) (map Set.singleton vars)
+        newMap = Map.fromList $ zip vars sets in
+        update addressDesc newMap
+
+
+
+
 
 
 
@@ -295,7 +316,7 @@ giveReg (QaVar y) = do
         (Just reg, Nothing) -> do
             update addressDesc (removeRegFromDescs reg adesc) -- register still holds value, not sure if it's ok
             return reg
-        _ -> case allRegisters List.\\ (Map.keys rdesc) of -- check if there are any free registers
+        _ -> case workingRegisters List.\\ (Map.keys rdesc) of -- check if there are any free registers
             (reg:_) -> return reg
             [] -> do
                 reg <- furthestBusyRegister
@@ -304,7 +325,7 @@ giveReg (QaVar y) = do
 
 giveReg (QaConst y) = do
     rdesc <- lgets registerDesc
-    case allRegisters List.\\ (Map.keys rdesc) of -- check if there are any free registers
+    case workingRegisters List.\\ (Map.keys rdesc) of -- check if there are any free registers
         (reg:_) -> return reg
         [] -> do
             reg <- furthestBusyRegister --TODO perhaps fix it, beacause the implemention is old
@@ -351,16 +372,37 @@ forgetIfUnused var = do
             update registerDesc (removeFromAllSets var rdesc)
 
 
---special ones: fun, jump, assign,
---x is var, y may be QaConst Int QaVar Int
 
-quadToAsm (QuadNoAssign OpRetV QaEmpty QaEmpty) nu = error "TODO"
-quadToAsm (QuadNoAssign OpRet arg QaEmpty) nu = error "TODO"
-quadToAsm (QuadNoAssign (OpAllocString pos len) QaEmpty QaEmpty) nu = error "TODO"
-quadToAsm (QuadNoAssign (OpJmp label) QaEmpty QaEmpty) nu = error "TODO"
+
+
+
+
+
+
+
+---
+--- Translating single quadruple to assembly
+---
+quadToAsm (QuadNoAssign OpRet QaEmpty QaEmpty) nu =  emit ARet
+quadToAsm (QuadNoAssign OpRet arg QaEmpty) nu = do
+    case arg of
+        QaVar v -> do
+            vl <- lgets varLocations
+            case Map.lookup v vl of
+                Just mem -> do
+                    emit $ AMov (AAMem mem) (AAReg Rax)
+                    emit ARet
+                Nothing -> error "variable not declared"
+        QaConst c -> do
+            emit $ AMov (AAConst c) (AAReg Rax)
+            emit ARet
+
+quadToAsm (QuadNoAssign (OpJmp label) QaEmpty QaEmpty) nu = emit $ AJmp label
+quadToAsm (QuadNoAssign (OpLabel label) QaEmpty QaEmpty) nu = emit $ ALab label
 quadToAsm (QuadNoAssign (OpGoToIfFalse label) arg1 QaEmpty) nu = error "TODO"
-quadToAsm (QuadNoAssign (OpLabel label) QaEmpty QaEmpty) nu = error "TODO"
-quadToAsm (QuadNoAssign (OpCall fname) args QaEmpty) nu = error "TODO"
+quadToAsm (Quad4 x (OpAllocString pos len) QaEmpty QaEmpty) nu = error "TODO"
+quadToAsm (Quad4 x (OpCall fname) args QaEmpty) nu = error "TODO"
+quadToAsm (Quad4 x (OpAssVar) y _) nu = error "TODO"
 
 quadToAsm q@(Quad4 x op y z) nextUses = do
     rdesc <- lgets registerDesc
@@ -375,8 +417,6 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                     False -> return ()
                 QaConst cy -> return ()
             case z of
-                QaEmpty -> case op of
-                    OpAssVar -> return ()
                 _ -> do
                     zp <- whereVarPreferReg z
                     case (zp, op) of
@@ -397,7 +437,11 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                         (zarg, OpAnd) -> emit $ AAnd zarg (AAReg l)
                         (zarg, OpOr) -> emit $ AOr zarg (AAReg l)
                         (zarg, OpCmpIntLt) -> emit $ AOr zarg (AAReg l)
-
+                        (zarg, OpCmpIntLe) -> error ""
+                        (zarg, OpCmpIntGt) -> error ""
+                        (zarg, OpCmpIntGe) -> error ""
+                        (zarg, OpCmpIntEq) -> error ""
+                        (zarg, OpCmpIntNe) -> error ""
 
             update addressDesc (Map.insert x (Set.singleton l, Set.empty) adesc)
             update registerDesc (compose rdesc [removeFromAllSets x, Map.insert l (Set.singleton x)])
@@ -409,63 +453,124 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                 _ -> return ()
         Nothing -> return ()
 
--- We assume that all t
--- TODO 1 musi zwrocic liczbe spilled, zeby zaalokowac i zwolnic dodatkowa pamiec
--- Nie bedziemy zwalniac, te dodatkowo zaalokowane wartosci moga rosnac jak jest duzo blokow
--- (no ale nie bedzie duzo blokow ofc)
-quadsToAsm wrappedNextUses = do
+
+quadsToAsm wrappedNextUses aliveBlockEnd = do
     mapM_ (uncurry quadToAsm) wrappedNextUses
+    saveVarsAfterBlock aliveBlockEnd
 
-
--- all living variables mu be in the memory at the end
-
---Map.filterWithKey () where
---    adesc <- lgets addressDesc
---    filterDirty k v = (elem k aliveVars) && (not $ k elem v)
---    varsToSave = Map.filterWithKey filterDirty adesc
-
-
-
--- trzebaj eszcze zapisac do pamieci ofc
---required: aliveBlockEnd, args, locals, tmps, quads
---- firstFree is in memory
-runQuadsToAsm quads aliveBlockEnd addressDesc firstFree varLocs =
+--- translates block of quads to assembly, can modify memory
+runQuadsToAsm :: [Quad] -> [Var] -> Map.Map Var MemoryLocation -> Int-> (Map.Map Var MemoryLocation, Int, [ASM])
+runQuadsToAsm quads aliveBlockEnd varLocs fFree =
     let
-        initAddressDesc = addressDesc
+        initSingleAd ad = (ad, (Set.empty, Set.singleton ad))
+        initAddressDesc = Map.fromList $ map initSingleAd (Map.keys varLocs)
         initRegisterDesc = Map.empty
-        initFirstFree = firstFree
+        initFirstFree = fFree
         initNextUseInfo = Map.empty
         initVarLocations = varLocs
         (wrapNextUses, aliveStart) = appendNextUses quads aliveBlockEnd
         pState = QuadProgState initAddressDesc initRegisterDesc initFirstFree initNextUseInfo initVarLocations
-        evalResult = runEval pState (quadsToAsm wrapNextUses) in
+        evalResult = runEval pState (quadsToAsm wrapNextUses aliveBlockEnd) in
         case evalResult of
-            Right ((a, s), w) -> return $ w
-            Left errMessage -> do hPutStrLn stderr errMessage
-                                  exitFailure
-
--- initAddressDesc = Map.fromList $ zip [1..firstFree-1] (map (Set.singleton . AAMem) [1..firstFree-1])
---test2 = nextUses [Quad Add 5 6 7, Quad Mul 1 2 3, Quad Mul 11 1 13] [5, 1, 2]
-
-quad1 = Quad4 1 OpAdd (QaVar 2) (QaVar 3)
-quad2 = Quad4 4 OpAdd (QaVar 5) (QaVar 6)
-quad3 = Quad4 7 OpAdd (QaVar 8) (QaVar 9)
-quad4 = Quad4 10 OpAdd (QaVar 11) (QaVar 12)
-quad5 = Quad4 13 OpAdd (QaVar 14) (QaVar 15)
-quads :: [Quad]
-quads = [quad1, quad2, quad3, quad4, quad5]
---prepareQuads quads = reverse (zip [1..] quads)
---alQuad :: Map.Map Var LineNumber
---alQuad = Map.fromList [(1, 100), (5, 100)]
+            Right ((a, s), w) -> (_varLocations s, _firstFree s, w)
 
 
---ret = runQuadsToAsm quads 200 [1, 4, 7, 10, 13]
 
 
---- TODO --------------pozapisuj zmienne, potem duzo testow
-----------------------
-------testing functions
-------------jhhhhhhh--
+
+-----------------------------
+---- building CFG
+--------------------------
+type Graph = Map.Map Int [Int]
+
+startsBlock :: Quad -> Bool
+startsBlock q = case q of
+    QuadNoAssign (OpLabel _) _ _ -> True
+    Quad4 _ (OpCall _) _ _ -> True
+    Quad4 _ (OpAllocString _ _) _ _ -> True
+    _ -> False
+
+endsBlock :: Quad -> Bool
+endsBlock q = case q of
+    QuadNoAssign (OpJmp _) _ _ -> True
+    QuadNoAssign (OpGoToIfFalse _) _ _ -> True
+    _ -> False
+
+
+splitIntoBlocksHelper [] [] = []
+splitIntoBlocksHelper cB [] = [cB]
+splitIntoBlocksHelper currentBlock (quad:rest) = case startsBlock quad of
+    True -> (currentBlock:(splitIntoBlocksHelper [quad] rest))
+    False -> case endsBlock quad of
+        True -> (quad:currentBlock):(splitIntoBlocksHelper [] rest)
+        False -> splitIntoBlocksHelper (quad:currentBlock) rest
+
+splitIntoBlocks quads = map reverse (splitIntoBlocksHelper [] quads)
+
+lookupMany l m = result where
+    lookupOne m x = case Map.lookup x m of
+        Just x -> x
+        Nothing -> []
+    result = concatMap (lookupOne m) l
+
+canGoTo :: (Int, [Quad]) -> (Int, [Quad]) -> Bool
+canGoTo (i1, b1) (i2, b2) = case (last b1, head b2) of
+    (QuadNoAssign (OpGoToIfFalse lab1) _ _, QuadNoAssign (OpLabel lab2) _ _) -> lab1 == lab2
+    (QuadNoAssign (OpJmp lab1) _ _, QuadNoAssign (OpLabel lab2) _ _) -> lab1 == lab2
+    _ -> (i1+1) == i2
+
+buildCFG :: [[Quad]] -> Map.Map Int [Int]
+buildCFG blocks = graph where
+    numberedBlocksList = zip [1..] blocks
+    numBlock = Map.fromList numberedBlocksList
+    getSuccessors b1 = map fst $ filter (canGoTo b1) numberedBlocksList
+    graph = Map.fromList $ zip [1..] (map getSuccessors numberedBlocksList)
+
+
+
+--------------------------
+------Calculating in-out for all blocks in CFG
+-------------------------
+
+
+cfgHelper1 :: Graph -> Graph -> Graph -> Graph -> Graph -> Int -> (Graph, Graph)
+cfgHelper1 graph useM defM inM outM size = result where
+    calcIn n = case (Map.lookup n useM, Map.lookup n outM, Map.lookup n defM) of
+        (Just nuse, Just nout, Just ndef) -> (n, List.nub (nuse ++ (nout List.\\ ndef)))
+        _ -> error "buildInout"
+    calcOut n = case Map.lookup n graph of
+       Just l -> (n, List.nub (lookupMany l inM))
+       Nothing -> error "buildInout"
+    r1 = map calcIn [1..size]
+    r2 = map calcOut [1..size]
+    result = (Map.fromList r1, Map.fromList r2)
+
+cfgHelper2 graph useM defM inM outM size = case cfgHelper1 graph useM defM inM outM size of
+        (a, b) -> case (a == inM) && (b == outM) of
+            True -> (a, b)
+            False -> cfgHelper2 graph useM defM a b size
+
+calcInOut graph blocks = result where
+    size = length blocks
+    useM = Map.fromList $ zip [1..] (map usedInBlock blocks)
+    defM = Map.fromList $ zip [1..] (map definedInBlock blocks)
+    inM = Map.fromList $ zip [1..size] (repeat [])
+    outM = Map.fromList $ zip [1..size] (repeat [])
+    result = cfgHelper2 graph useM defM inM outM size
+
+
+------------------------------
+------------------------------
+------------------------------
+
+
+
+
+
+
+
+
+
 
 
 
@@ -500,29 +605,109 @@ runTest ok msg = do
         False -> do hPutStrLn stderr "tests failed"
                     hPutStrLn stderr msg
                     exitFailure
-------------------------------------
------------------------------------
-
----- w prelude musi byc alokacja statyczna!
--------------------------------
 
 
 
 
 
 
+v1 = QaVar 1
+v2 = QaVar 2
+v3 = QaVar 3
+v4 = QaVar 4
+v5 = QaVar 5
+v6 = QaVar 6
+
+ve = QaEmpty
+v11 = QaList []
+v12 = QaConst 5
+
+qa1 = Quad4 5 OpAdd v2 v4
+qa2 = QuadNoAssign (OpLabel ("L1")) ve ve
+qa3 = Quad4 1 OpAdd v2 v3
+qa4 = Quad4 2 OpAdd v3 v4
+qa5 = QuadNoAssign (OpGoToIfFalse "L1") ve ve
+qa6 = Quad4 4 OpAdd v5 v6
+qa7 = Quad4 12 (OpCall "hehe") (QaList []) ve
+qa8 = QuadNoAssign (OpJmp "L1") ve ve
+qa9 = Quad4 6 OpAdd v5 v4
+
+quadsTest = [qa1, qa2, qa3, qa4, qa5, qa6, qa7, qa8, qa9]
+quadsBlocks = splitIntoBlocks quadsTest
+cfgGraph = buildCFG quadsBlocks
+ci = calcInOut cfgGraph quadsBlocks
+--[(1,[2,4,3,6]),(2,[2,3,4,5,6]),(3,[5,6,2,3]),(4,[2,3,4,5,6]),(5,[5,4])],fromList [(1,[2,3,4,5,6]),(2,[2,3,4,5,6]),(3,[2,3,4,5,6]),(4,[2,3,4,5,6]),(5,[])]
+
+testMap1 = Map.fromList [(1, "afh"), (2, "eee"), (5, "rrr")]
+testLookupMany = (lookupMany [1, 5] testMap1) == "afhrrr"
 
 
 
+quad1 = Quad4 1 OpAdd (QaVar 2) (QaVar 3)
+quad2 = Quad4 4 OpAdd (QaVar 5) (QaVar 6)
+quad3 = Quad4 7 OpAdd (QaVar 8) (QaVar 9)
+quad4 = Quad4 10 OpAdd (QaVar 11) (QaVar 12)
+quad5 = Quad4 13 OpAdd (QaVar 14) (QaVar 15)
+ff = 50
+quads = [quad1, quad2, quad3, quad4, quad5]
+prepareQuads quads = reverse (zip [1..] quads)
+--alQuad :: Map.Map Var LineNumber
+--alQuad = Map.fromList [(1, 100), (5, 100)]
+
+
+--ret = runQuadsToAsm quads 200 [1, 4, 7, 10, 13]
+--------------
 
 
 
+-----------
+-----------
+-------------
 
 
+loadArgument i = case i of
+    0 -> AMov (AAReg Rdi) (AAMem 0)
+    1 -> AMov (AAReg Rsi) (AAMem 1)
+    2 -> AMov (AAReg Rdx) (AAMem 2)
+    3 -> AMov (AAReg Rcx) (AAMem 3)
+    4 -> AMov (AAReg R8) (AAMem 4)
+    5 -> AMov (AAReg R9) (AAMem 5)
+    i -> APop (AAMem i)
+
+loadArguments :: Int -> [ASM]
+loadArguments args = map loadArgument [0..(args-1)]
 
 
+--- MAIN function
+--- returns assembly and the number of vars to allocate on stack
+--- number of vars isn't known before translation, because asm can
+--- in some cases save temporary values to the memory (and need some more than local variables)
+functionToASM :: QuadFunction -> ([ASM], Int)
+functionToASM (QuadFunction (Ident name) quads argFreeMem args memory) = result where
+    prolog = [APush (AAReg Rbp), AMov (AAReg Rsp) (AAReg Rbp)]
+    loadArgs = loadArguments args
+    epilog = [ALeave]
+
+    varsInMemory = Map.keys memory
+    aDescVals = zip (repeat Set.empty) (map Set.singleton varsInMemory)
+    addressDesc = Map.fromList $ zip varsInMemory aDescVals
+
+    blocks = splitIntoBlocks quads
+    numberedBlocks = zip [1..] blocks
+    graph = buildCFG blocks
+    (inInfo, outInfo) = calcInOut graph blocks
+
+    blocksToAsm ((i, q):t) mem freeLoc = case Map.lookup i outInfo of
+        Just alive -> case runQuadsToAsm q alive mem freeLoc of
+            (newMem, newFree, asm1) -> case blocksToAsm t newMem newFree of
+                (asm2, fm2) -> (asm1 ++ asm2, fm2)
+        Nothing -> error "fatal"
+    blocksToAsm [] mem freeLoc = ([], freeLoc)
+
+    shortenMem (vname, (position, ty)) = (vname, position)
+    shortMem = Map.fromList $ map shortenMem (Map.toList memory)
 
 
-
-
-
+    (asm, freeMem) = blocksToAsm (zip [1..] blocks) (shortMem) (argFreeMem)
+    resultAsm = prolog ++ loadArgs ++ asm ++ epilog
+    result = (resultAsm, freeMem)

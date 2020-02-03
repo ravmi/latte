@@ -1,4 +1,8 @@
 int main(int a, int b, int c, int d, int e) {
     int a;
-    return a + b + c + d + e;
+    {
+        int b;
+        b = 12;
+    }
+    return (a + b + c + d) * e;
 }
