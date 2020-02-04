@@ -678,7 +678,7 @@ loadArgument i = case i of
 loadArguments :: Int -> [ASM]
 loadArguments args = map loadArgument [0..(args-1)]
 
-
+--TODO fix assignment
 --- MAIN function
 --- returns assembly and the number of vars to allocate on stack
 --- number of vars isn't known before translation, because asm can
