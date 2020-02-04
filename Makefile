@@ -3,8 +3,10 @@ all:	ParLatte.hs latc_x86_64
 latc_x86_64:	lat_to_asm
 	cp src/latc_x86_64 latc_x86_64
 
-lat_to_asm:
+lat_to_asm: latte
 	ghc --make -isrc src/latte.hs -o lat_to_asm
+
+latte: src/latte.hs
 	
 clean:
 	rm -f lat_to_asm latc_x86_64

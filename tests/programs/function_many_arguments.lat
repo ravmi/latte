@@ -1,0 +1,12 @@
+int main(int a, int b, int c, int d, int e) {
+    int a = 24;
+    {
+        int b;
+        b = 12;
+    }
+    // printInt(a);
+    //printInt(a);
+    printInt(4);
+    return (a + b + c + d) * e;
+    //return 4;
+}
