@@ -30,6 +30,7 @@ import AbsLatte
 import ErrM
 
 import QuadData
+import ImdLatte (functionToASM)
 
 
 type Loc = Int
@@ -606,7 +607,7 @@ runText s = let ts = myLexer s in case pProgram ts of
                 hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
-    Ok tree -> case runEval (ProgState Map.empty 1 1 Void (Void, False) [] 1 Map.empty Map.empty 0 1 Map.empty) (programToQuadsInMonad tree) of
+    Ok tree -> case runEval (ProgState Map.empty 0 0 Void (Void, False) [] 1 Map.empty Map.empty 0 0 Map.empty) (programToQuadsInMonad tree) of
         Right ((qfunctions, static), w) -> do
             --print tree
             return $ qfunctions

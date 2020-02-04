@@ -1,4 +1,5 @@
 module CFG where
+-- Control Flow Graph
 
 import QuadData
 import NextUses (usedInBlock, definedInBlock)

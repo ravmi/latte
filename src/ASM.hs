@@ -18,12 +18,19 @@ data ASM = APush AmdArg
          | AAnd AmdArg AmdArg
          | AOr AmdArg AmdArg
          | AMov AmdArg AmdArg
+         | ACmp AmdArg AmdArg
          | ACdq
          | ARet
          | ALab String
          | AJmp String
          | AJmpNe String
          | ALeave
+         | ASetLt
+         | ASetLe
+         | ASetGt
+         | ASetGe
+         | ASetEq
+         | ASetNe
           deriving (Eq, Ord, Read)
 
 workingRegisters = [Rbx, Rcx, Rsi, Rdi, R8, R9, R10, R11]
@@ -64,9 +71,15 @@ instance Show ASM where
     show (AAnd arg1 arg2) = "andq " ++ (scs [arg1, arg2])
     show (AOr arg1 arg2) = "orq " ++ (scs [arg1, arg2])
     show (AMov arg1 arg2) = "movq " ++ (scs [arg1, arg2])
+    show (ACmp arg1 arg2) = "cmpq " ++ (scs [arg1, arg2])
     show (ACdq) = "cdq"
     show (ARet) = "ret"
     show (ALab lname) = "." ++ lname ++ ":"
     show (AJmp lname) = "jmp ." ++ lname
     show (AJmpNe lname) = "jne ." ++ lname
     show (ALeave) = "leave"
+    show (ASetLt) = "setl %al"
+    show (ASetLe) = "setle %al"
+    show (ASetGt) = "setg %al"
+    show (ASetGe) = "setge %al"
+    show (ASetEq) = "sete %al"
