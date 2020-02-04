@@ -31,6 +31,7 @@ data ASM = APush AmdArg
          | ASetGe
          | ASetEq
          | ASetNe
+         | ACall String
           deriving (Eq, Ord, Read)
 
 workingRegisters = [Rbx, Rcx, Rsi, Rdi, R8, R9, R10, R11]
@@ -83,3 +84,4 @@ instance Show ASM where
     show (ASetGt) = "setg %al"
     show (ASetGe) = "setge %al"
     show (ASetEq) = "sete %al"
+    show (ACall fname) = "call " ++ fname

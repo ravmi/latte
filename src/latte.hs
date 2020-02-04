@@ -226,8 +226,9 @@ translateExpression (EApp funName funArgs) = do
 translateExpression (EString str) = do
     newVar <- newVarName
     sMem <- allocStatic str
-    emit $ Quad4 newVar (OpAllocString sMem (length str + 1)) QaEmpty QaEmpty
-    return $ (QaVar newVar, Str)
+    return $ QaConstStr ("." ++ (show sMem))
+    -- emit $ Quad4 newVar (OpAllocString sMem (length str + 1)) QaEmpty QaEmpty
+    --return $ (QaVar newVar, Str)
 
 --- OK
 translateExpression (Neg expr) = do
@@ -268,7 +269,7 @@ translateExpression (EAdd exp1 Plus exp2) = do
         (throwError $ badTypes "`+`" [t1, t2])
     case t1 of
         Int -> do emit $ Quad4 newVar OpAdd r1 r2
-        Str -> do emit $ Quad4 newVar (OpCall "concatStrings") (QaList [r1, r2]) QaEmpty
+        Str -> do emit $ Quad4 newVar (OpCall "concatStrings_") (QaList [r1, r2]) QaEmpty
     return (QaVar newVar, t1)
 
 translateExpression (EAdd exp1 Minus exp2) = do
@@ -581,7 +582,7 @@ declareNativeFunctions = do
     insertFunction "readInt" (Fun Int [])
     insertFunction "readString" (Fun Str [])
 
-    insertFunction "concatStrings" (Fun Str [Str, Str])
+    insertFunction "concatStrings_" (Fun Str [Str, Str])
     return ()
 
 

@@ -6,7 +6,7 @@ import qualified Data.Set as Set
 
 import Data.List (intercalate)
 
-data QArgument = QaVar Var | QaConst Int | QaEmpty | QaList [QArgument]
+data QArgument = QaVar Var | QaConst Int | QaEmpty | QaList [QArgument] | QaConstStr String
     deriving (Eq, Ord, Read, Show)
 
 printQa (QaVar v) = "v" ++ (show v)

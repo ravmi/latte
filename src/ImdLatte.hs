@@ -100,6 +100,23 @@ addressDescInsertRegister k v = let
     adesc <- lgets addressDesc
     update addressDesc (Map.alter alterFun k adesc)
 
+forgetVarFromRegDesc :: Var -> Eval ()
+forgetVarFromRegDesc v = let
+    alterFun Nothing = Nothing
+    alterFun (Just s) = Just $ Set.delete v s in do
+    rdesc <- lgets registerDesc
+    update registerDesc (alterAll alterFun rdesc)
+
+forgetVarFromAddDesc :: Var -> Eval ()
+forgetVarFromAddDesc v = let
+    alterFun Nothing = Nothing
+    alterFun (Just (regs, vars)) = Just $ (regs, Set.delete v vars) in do
+    adesc <- lgets addressDesc
+    update addressDesc (alterAll alterFun adesc)
+
+
+
+
 ---------------------------------------------------
 ----- functions calculating next uses of quadruples
 -------------------------------------------------------
@@ -272,16 +289,19 @@ giveReg (QaVar y) = do
                 spillReg reg
                 return reg
 
-giveReg (QaConst y) = do
-    rdesc <- lgets registerDesc
-    case workingRegisters List.\\ (Map.keys rdesc) of -- check if there are any free registers
-        (reg:_) -> return reg
-        [] -> do
-            reg <- furthestBusyRegister --TODO perhaps fix it, beacause the implemention is old
-            spillReg reg
-            return reg
-
-giveReg _ = error "giveReg used in wrong place"
+giveReg arg = let
+    giveRegConst = do
+        rdesc <- lgets registerDesc
+        case workingRegisters List.\\ (Map.keys rdesc) of -- check if there are any free registers
+            (reg:_) -> return reg
+            [] -> do
+                reg <- furthestBusyRegister --TODO perhaps fix it, beacause the implemention is old
+                spillReg reg
+                return reg in
+    case arg of
+        (QaConst _) -> giveRegConst
+        (QaConstStr _) -> giveRegConst
+        _ -> error "giveReg used in wrong place"
 
 
 isRegister :: AmdArg -> Bool
@@ -300,6 +320,7 @@ whereVarPreferReg (QaVar var) = do
         Nothing -> error "var is nowhere"
 
 whereVarPreferReg (QaConst c) = return $ AAConst c
+whereVarPreferReg (QaConstStr c) = return $ AAConst c
 
 
 updateNextUses :: (Map.Map Var NextUse) -> Eval ()
@@ -308,17 +329,31 @@ updateNextUses newInfo = do
     update nextUseInfo (Map.union newInfo oldInfo)
 
 
-forgetIfUnused :: Var -> Eval ()
-forgetIfUnused var = do
+forgetIfUnused :: QArgument -> Eval ()
+forgetIfUnused y = do
     rdesc <- lgets registerDesc
     adesc <- lgets addressDesc
     nextUses <- lgets nextUseInfo
 
-    case Map.lookup var nextUses of
-        Just line -> return ()
-        Nothing -> do
-            update addressDesc (Map.delete var adesc)
-            update registerDesc (removeFromAllSets var rdesc)
+    case y of
+        (QaVar var) -> case Map.lookup var nextUses of
+            Just line -> return ()
+            Nothing -> do
+                update addressDesc (Map.delete var adesc)
+                update registerDesc (removeFromAllSets var rdesc)
+        (QaConst c) -> return ()
+        (QaConstStr _) -> return ()
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -339,34 +374,59 @@ quadToAsm (QuadNoAssign OpRet QaEmpty QaEmpty) nu = do
 quadToAsm (QuadNoAssign OpRet arg QaEmpty) nu = do
     updateNextUses nu
     case arg of
-        QaVar v -> do
-            wm <- whereVarPreferReg (QaVar v)
+        QaEmpty -> emit ARet
+        _ -> do
+            wm <- whereVarPreferReg arg
             emit $ AMov wm (AAReg Rax)
-            emit $ ARet
-            --case Map.lookup v vl of
-            --    Just mem -> do
-            --        emit $ AMov (AAMem mem) (AAReg Rax)
-            --        emit ARet
-            --    Nothing -> error "variable not declared"
-        QaConst c -> do
-            emit $ AMov (AAConst c) (AAReg Rax)
             emit ARet
 
---TODO fix assignment
 quadToAsm (QuadNoAssign (OpJmp label) QaEmpty QaEmpty) nu = do
     updateNextUses nu
     emit $ AJmp label
+
 quadToAsm (QuadNoAssign (OpLabel label) QaEmpty QaEmpty) nu = do
     updateNextUses nu
     emit $ ALab label
+
 quadToAsm (QuadNoAssign (OpGoToIfFalse label) arg1 QaEmpty) nu = do
     whereArg <- whereVarPreferReg arg1
     emit $ ACmp (AAConst 1) whereArg
     emit $ AJmpNe label
-quadToAsm (Quad4 x (OpAllocString pos len) QaEmpty QaEmpty) nu = error "TODO"
-quadToAsm (Quad4 x (OpCall fname) args QaEmpty) nu = error "TODO"
+
+quadToAsm (Quad4 x (OpAllocString pos len) QaEmpty QaEmpty) nu = do
+    error "TODO"
+
+quadToAsm (Quad4 x (OpCall fname) (QaList args) QaEmpty) nu = let
+    putArguments [] = []
+    putArguments l@((i, arg):t) = case i of
+        0 -> ((AMov arg (AAReg Rdi)):putArguments t)
+        1 -> ((AMov arg (AAReg Rsi)):putArguments t)
+        2 -> ((AMov arg (AAReg Rdx)):putArguments t)
+        3 -> ((AMov arg (AAReg Rcx)):putArguments t)
+        4 -> ((AMov arg (AAReg R8)):putArguments t)
+        5 -> ((AMov arg (AAReg R9)):putArguments t)
+        i -> map (APush . snd) (reverse l) in do
+    case (length args) > 6 of
+        False -> return ()
+        True -> emit $ ASub (AAConst (((length args) - 6) * 8)) (AAReg Rsp)
+    amdArgs <- mapM whereVarPreferReg args
+    updateNextUses nu
+    mapM_ emit (putArguments $ zip [0..] amdArgs)
+    emit $ ACall fname
+    case (length args) > 6 of
+        False -> return ()
+        True -> emit $ AAdd (AAConst (((length args) - 6) * 8)) (AAReg Rsp)
+    mapM_ forgetIfUnused args
+    whereX <- whereInMemory x
+    emit $ AMov (AAReg Rax) whereX
+    forgetVarFromRegDesc x
+    forgetVarFromAddDesc x
+    adesc <- lgets addressDesc
+    update addressDesc (Map.insert x (Set.empty, Set.singleton x) adesc)
+
 quadToAsm (Quad4 x (OpAssVar) (QaVar y) _) nu = let
     alterRegs (Nothing) = Nothing
+    -- if y was rememered in some register, then x should be as well
     alterRegs (Just s) = case Set.member y s of
         True -> Just $ Set.insert x s
         False -> Just s in do
@@ -375,6 +435,7 @@ quadToAsm (Quad4 x (OpAssVar) (QaVar y) _) nu = let
     rdesc <- lgets registerDesc
     update registerDesc (alterAll alterRegs rdesc)
     case Map.lookup y adesc of
+        -- positions of x are now the same as y
         Just yVal -> update addressDesc (Map.insert x yVal adesc)
         Nothing -> error "assign error"
 
@@ -382,10 +443,13 @@ quadToAsm (Quad4 x (OpAssVar) (QaConst y) _) nu = do
     updateNextUses nu
     whereX <- whereInMemory x
     emit $ AMov (AAConst y) whereX
+    forgetVarFromRegDesc x
+    forgetVarFromAddDesc x
+    adesc <- lgets addressDesc
+    update addressDesc (Map.insert x (Set.empty, Set.singleton x) adesc)
 
 quadToAsm q@(Quad4 x op y z) nextUses = do
     rdesc <- lgets registerDesc
-    adesc <- lgets addressDesc
     updateNextUses nextUses
     case Map.lookup x nextUses of
         Just xline -> do
@@ -443,14 +507,10 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                             emit $ ASetNe
                             emit $ AMov (AAReg Rax) (AAReg l)
 
+            adesc <- lgets addressDesc
             update addressDesc (Map.insert x (Set.singleton l, Set.empty) adesc)
             update registerDesc (compose rdesc [removeFromAllSets x, Map.insert l (Set.singleton x)])
-            case y of
-                QaVar vy -> forgetIfUnused vy
-                QaConst cy-> return ()
-            case z of
-                QaVar vz -> forgetIfUnused vz
-                _ -> return ()
+            mapM_ forgetIfUnused [y, z]
         Nothing -> return ()
 
 
@@ -508,7 +568,7 @@ runQuadsToAsm quads aliveBlockEnd varLocs fFree =
 -----------
 -------------
 
-
+--TODO fix this
 loadArgument i = case i of
     0 -> AMov (AAReg Rdi) (AAMem 0)
     1 -> AMov (AAReg Rsi) (AAMem 1)
