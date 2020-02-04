@@ -23,6 +23,8 @@ import Control.Monad.State
 import Data.Maybe
 import qualified Data.List as List
 import ASM
+import CFG (splitIntoBlocks, buildCFG, calcInOut, Graph)
+import NextUses (appendNextUses)
 
 
 import QuadData
@@ -41,8 +43,6 @@ compose x (y:ys) = compose (y x) ys
 
 type NextUse = Int
 type MemoryLocation = Int
-type LineNumber = Int
-type NextUsesMap = Map.Map Var LineNumber
 
 data QuadProgState = QuadProgState { _addressDesc :: AddressDescriptions -- replace this set with two sets/lists
                  , _registerDesc :: Map.Map Reg (Set.Set Var)
@@ -97,65 +97,7 @@ removeRegFromDescs reg m = result where
 ----- functions calculating next uses of quadruples
 -------------------------------------------------------
 
--- Updates map of next uses to its state from before quadruple
-nextUsesBeforeQuad :: NextUsesMap -> LineNumber -> Quad -> NextUsesMap
-nextUsesBeforeQuad nextUses lineNum q = result where
-    insertList (h:t) m = insertList t (Map.insert h lineNum m)
-    insertList [] m = m
-    deleteList (h:t) m = deleteList t (Map.delete h m)
-    deleteList [] m = m
-    used = usedInQuad q
-    defined = definedInQuad q
 
-    result = insertList used (deleteList defined nextUses)
-
-
-definedInQuad :: Quad -> [Var]
-definedInQuad (Quad4 x _ y z) = [x]
-definedInQuad (QuadNoAssign _ y z) = []
-
-definedInBlock :: [Quad] -> [Var]
-definedInBlock quads = List.nub $ concatMap definedInQuad quads
-
-yAndZ :: Quad -> (QArgument, QArgument)
-yAndZ (Quad4 _ _ y z) = (y, z)
-yAndZ (QuadNoAssign _ y z) = (y, z)
-
-usedInQuad q = result where
-    (y, z) = yAndZ q
-    filterVar (QaVar x) = [x]
-    filterVar _ = []
-    usedInName name = case name of
-        QaVar var -> [var]
-        QaList l -> concat (map filterVar l)
-        _ -> []
-    result = List.nub $ (usedInName y) ++ (usedInName z)
-
-usedInBlock quads = List.nub $ concatMap usedInQuad quads
-
-
---- helper function, takes reveresd list with line numbers and returns for each quadruple information about next uses of
---- its variables
-revNextUsesList :: [(LineNumber, Quad)] -> NextUsesMap -> [NextUsesMap]
-revNextUsesList [] nextUses = [nextUses]
-revNextUsesList ((lineNum, q):t) nextUses = result where
-    nextUsesBefore = nextUsesBeforeQuad nextUses lineNum q
-    allNames = List.nub $ (definedInQuad q) ++ (usedInQuad q)
-    filterFun k val = elem k allNames
-    result = (Map.filterWithKey filterFun nextUses):(revNextUsesList t nextUsesBefore)
-
-
--- appends next uses to each line and returns variable alive at the beginning of the block
--- IMPORTANT function
-appendNextUses :: [Quad] -> [Var] -> ([(Quad, NextUsesMap)], [Var])
-appendNextUses quads aliveBlockEnd = result where
-    numberedReversed = reverse $ zip [1..] quads
-    countQuads = length quads
-    nextUsesAtTheEnd = Map.fromList $ zip aliveBlockEnd (repeat (countQuads + 1))
-    revNextResult = reverse $ revNextUsesList numberedReversed nextUsesAtTheEnd
-    aliveStart = Map.keys $ head revNextResult
-    quadsWithUses = zip quads (tail revNextResult)
-    result = (quadsWithUses, aliveStart)
 -------------------------------------
 --------------------------------------------------
 --------------------------------------------------
@@ -398,6 +340,7 @@ quadToAsm (QuadNoAssign OpRet arg QaEmpty) nu = do
             emit $ AMov (AAConst c) (AAReg Rax)
             emit ARet
 
+--TODO fix assignment
 quadToAsm (QuadNoAssign (OpJmp label) QaEmpty QaEmpty) nu = emit $ AJmp label
 quadToAsm (QuadNoAssign (OpLabel label) QaEmpty QaEmpty) nu = emit $ ALab label
 quadToAsm (QuadNoAssign (OpGoToIfFalse label) arg1 QaEmpty) nu = error "TODO"
@@ -482,50 +425,7 @@ runQuadsToAsm quads aliveBlockEnd varLocs fFree =
 -----------------------------
 ---- building CFG
 --------------------------
-type Graph = Map.Map Int [Int]
 
-startsBlock :: Quad -> Bool
-startsBlock q = case q of
-    QuadNoAssign (OpLabel _) _ _ -> True
-    Quad4 _ (OpCall _) _ _ -> True
-    Quad4 _ (OpAllocString _ _) _ _ -> True
-    _ -> False
-
-endsBlock :: Quad -> Bool
-endsBlock q = case q of
-    QuadNoAssign (OpJmp _) _ _ -> True
-    QuadNoAssign (OpGoToIfFalse _) _ _ -> True
-    _ -> False
-
-
-splitIntoBlocksHelper [] [] = []
-splitIntoBlocksHelper cB [] = [cB]
-splitIntoBlocksHelper currentBlock (quad:rest) = case startsBlock quad of
-    True -> (currentBlock:(splitIntoBlocksHelper [quad] rest))
-    False -> case endsBlock quad of
-        True -> (quad:currentBlock):(splitIntoBlocksHelper [] rest)
-        False -> splitIntoBlocksHelper (quad:currentBlock) rest
-
-splitIntoBlocks quads = map reverse (splitIntoBlocksHelper [] quads)
-
-lookupMany l m = result where
-    lookupOne m x = case Map.lookup x m of
-        Just x -> x
-        Nothing -> []
-    result = concatMap (lookupOne m) l
-
-canGoTo :: (Int, [Quad]) -> (Int, [Quad]) -> Bool
-canGoTo (i1, b1) (i2, b2) = case (last b1, head b2) of
-    (QuadNoAssign (OpGoToIfFalse lab1) _ _, QuadNoAssign (OpLabel lab2) _ _) -> lab1 == lab2
-    (QuadNoAssign (OpJmp lab1) _ _, QuadNoAssign (OpLabel lab2) _ _) -> lab1 == lab2
-    _ -> (i1+1) == i2
-
-buildCFG :: [[Quad]] -> Map.Map Int [Int]
-buildCFG blocks = graph where
-    numberedBlocksList = zip [1..] blocks
-    numBlock = Map.fromList numberedBlocksList
-    getSuccessors b1 = map fst $ filter (canGoTo b1) numberedBlocksList
-    graph = Map.fromList $ zip [1..] (map getSuccessors numberedBlocksList)
 
 
 
@@ -534,30 +434,7 @@ buildCFG blocks = graph where
 -------------------------
 
 
-cfgHelper1 :: Graph -> Graph -> Graph -> Graph -> Graph -> Int -> (Graph, Graph)
-cfgHelper1 graph useM defM inM outM size = result where
-    calcIn n = case (Map.lookup n useM, Map.lookup n outM, Map.lookup n defM) of
-        (Just nuse, Just nout, Just ndef) -> (n, List.nub (nuse ++ (nout List.\\ ndef)))
-        _ -> error "buildInout"
-    calcOut n = case Map.lookup n graph of
-       Just l -> (n, List.nub (lookupMany l inM))
-       Nothing -> error "buildInout"
-    r1 = map calcIn [1..size]
-    r2 = map calcOut [1..size]
-    result = (Map.fromList r1, Map.fromList r2)
 
-cfgHelper2 graph useM defM inM outM size = case cfgHelper1 graph useM defM inM outM size of
-        (a, b) -> case (a == inM) && (b == outM) of
-            True -> (a, b)
-            False -> cfgHelper2 graph useM defM a b size
-
-calcInOut graph blocks = result where
-    size = length blocks
-    useM = Map.fromList $ zip [1..] (map usedInBlock blocks)
-    defM = Map.fromList $ zip [1..] (map definedInBlock blocks)
-    inM = Map.fromList $ zip [1..size] (repeat [])
-    outM = Map.fromList $ zip [1..size] (repeat [])
-    result = cfgHelper2 graph useM defM inM outM size
 
 
 ------------------------------
@@ -640,7 +517,7 @@ ci = calcInOut cfgGraph quadsBlocks
 --[(1,[2,4,3,6]),(2,[2,3,4,5,6]),(3,[5,6,2,3]),(4,[2,3,4,5,6]),(5,[5,4])],fromList [(1,[2,3,4,5,6]),(2,[2,3,4,5,6]),(3,[2,3,4,5,6]),(4,[2,3,4,5,6]),(5,[])]
 
 testMap1 = Map.fromList [(1, "afh"), (2, "eee"), (5, "rrr")]
-testLookupMany = (lookupMany [1, 5] testMap1) == "afhrrr"
+--testLookupMany = (lookupMany [1, 5] testMap1) == "afhrrr"
 
 
 
@@ -678,7 +555,6 @@ loadArgument i = case i of
 loadArguments :: Int -> [ASM]
 loadArguments args = map loadArgument [0..(args-1)]
 
---TODO fix assignment
 --- MAIN function
 --- returns assembly and the number of vars to allocate on stack
 --- number of vars isn't known before translation, because asm can
