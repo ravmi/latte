@@ -22,6 +22,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Data.Maybe
 import qualified Data.List as List
+import ASM
 
 
 import QuadData
@@ -682,7 +683,7 @@ loadArguments args = map loadArgument [0..(args-1)]
 --- returns assembly and the number of vars to allocate on stack
 --- number of vars isn't known before translation, because asm can
 --- in some cases save temporary values to the memory (and need some more than local variables)
-functionToASM :: QuadFunction -> ([ASM], Int)
+functionToASM :: QuadFunction -> (String, [ASM])
 functionToASM (QuadFunction (Ident name) quads argFreeMem args memory) = result where
     prolog = [APush (AAReg Rbp), AMov (AAReg Rsp) (AAReg Rbp)]
     loadArgs = loadArguments args
@@ -710,4 +711,5 @@ functionToASM (QuadFunction (Ident name) quads argFreeMem args memory) = result 
 
     (asm, freeMem) = blocksToAsm (zip [1..] blocks) (shortMem) (argFreeMem)
     resultAsm = prolog ++ loadArgs ++ asm ++ epilog
-    result = (resultAsm, freeMem)
+    allocMemory = [ASub (AAConst (8 * freeMem)) (AAReg Rsp)]
+    result = (name, allocMemory ++ resultAsm)
