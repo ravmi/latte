@@ -1,0 +1,16 @@
+int fac(int n) {
+    if(n < 1) {
+        return 1;
+    } else {
+        return (n*fac(n-1));
+    }
+}
+
+int main() {
+    int i = 1;
+    while (i <= 10) {
+        printInt(fac(i));
+        i = i + 1;
+    }
+    return 0;
+}

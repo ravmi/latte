@@ -91,4 +91,5 @@ instance Show ASM where
     show (ASetGt) = "setg %al"
     show (ASetGe) = "setge %al"
     show (ASetEq) = "sete %al"
+    show (ASetNe) = "setne %al"
     show (ACall fname) = "call " ++ fname

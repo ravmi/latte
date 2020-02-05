@@ -1,0 +1,13 @@
+int main() {
+    int a = (5 + 4) / 2;  // 4
+    printInt(a);
+    int b = (6 * 6 + 6); // 42
+    printInt(b);
+    int c = b - a; // 38
+    printInt(c);
+    int cc = c * c * c;
+    printInt(cc);
+    int result = cc - 54875;
+    printInt(result);
+    return 0;
+}

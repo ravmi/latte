@@ -170,8 +170,8 @@ furthestBusyRegister = do
 
 
 -----------------------------------
-whereInMemory :: Var -> Eval AmdArg
-whereInMemory var = do
+whereOrAlloc :: Var -> Eval AmdArg
+whereOrAlloc var = do
     varLocs <- lgets varLocations
     case Map.lookup var varLocs of
         Just loc -> return $ AAMem loc
@@ -196,7 +196,7 @@ saveVarToMemory :: Reg -> Var -> Eval ()
 saveVarToMemory reg var = do
     adesc <- lgets addressDesc
     rdesc <- lgets registerDesc
-    whereMem <- whereInMemory var
+    whereMem <- whereOrAlloc var
     emit $ APush whereMem
     emit $ AMov (AAReg reg) whereMem
     emit $ APop (AAReg reg)
@@ -230,7 +230,7 @@ saveVarsAfterBlock vars = do
 
     -- TODO can be improved
     whereNow <- mapM (whereVarPreferReg . QaVar) dirtyVars
-    whereShould <- mapM whereInMemory dirtyVars
+    whereShould <- mapM whereOrAlloc dirtyVars
 
     debug <- trace (show dirtyVars ++ "<<- DIRTY VARS")  lgets addressDesc
     debug <- trace (show whereNow ++ " <-- WHERE NOW") lgets addressDesc
@@ -330,7 +330,7 @@ whereVarPreferReg (QaVar var) = do
     case Map.lookup var adesc of
         Just (regs, vars) -> case Set.null regs of
             True -> case (List.intersect (Set.toList vars) (Map.keys mem)) of
-                (h:_) -> whereInMemory h
+                (h:_) -> whereOrAlloc h
                 _ -> error "whereVarPreferReg1"
             False -> case (Set.toList regs) of
                 (h:_) -> return $ AAReg h
@@ -439,7 +439,7 @@ quadToAsm (Quad4 x (OpCall fname) (QaList args) QaEmpty) nu = let
         False -> return ()
         True -> emit $ AAdd (AAConst (((length args) - 6) * 8)) (AAReg Rsp)
     mapM_ forgetIfUnused args
-    whereX <- whereInMemory x
+    whereX <- whereOrAlloc x
     emit $ AMov (AAReg Rax) whereX
     forgetVarFromRegDesc x
     forgetVarFromAddDesc x
@@ -463,7 +463,7 @@ quadToAsm (Quad4 x (OpAssVar) (QaVar y) _) nu = let
 
 quadToAsm (Quad4 x (OpAssVar) (QaConst y) _) nu = do
     updateNextUses nu
-    whereX <- whereInMemory x
+    whereX <- whereOrAlloc x
     emit $ AMov (AAConst y) whereX
     forgetVarFromRegDesc x
     forgetVarFromAddDesc x
@@ -472,7 +472,7 @@ quadToAsm (Quad4 x (OpAssVar) (QaConst y) _) nu = do
 
 quadToAsm (Quad4 x (OpAssVar) (QaConstStr y) _) nu = do
     updateNextUses nu
-    whereX <- whereInMemory x
+    whereX <- whereOrAlloc x
     emit $ AMov (AAConstStr y) whereX
     forgetVarFromRegDesc x
     forgetVarFromAddDesc x
@@ -552,22 +552,27 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                             emit $ ASetLt
                             emit $ AMov (AAReg Rax) (AAReg l)
                         (zarg, OpCmpIntLe) -> do
+                            emit $ AXor (AAReg Rax) (AAReg Rax)
                             emit $ ACmp zp (AAReg l)
                             emit $ ASetLe
                             emit $ AMov (AAReg Rax) (AAReg l)
                         (zarg, OpCmpIntGt) -> do
+                            emit $ AXor (AAReg Rax) (AAReg Rax)
                             emit $ ACmp zp (AAReg l)
                             emit $ ASetGt
                             emit $ AMov (AAReg Rax) (AAReg l)
                         (zarg, OpCmpIntGe) -> do
+                            emit $ AXor (AAReg Rax) (AAReg Rax)
                             emit $ ACmp zp (AAReg l)
                             emit $ ASetGe
                             emit $ AMov (AAReg Rax) (AAReg l)
                         (zarg, OpCmpIntEq) -> do
+                            emit $ AXor (AAReg Rax) (AAReg Rax)
                             emit $ ACmp zp (AAReg l)
                             emit $ ASetEq
                             emit $ AMov (AAReg Rax) (AAReg l)
                         (zarg, OpCmpIntNe) -> do
+                            emit $ AXor (AAReg Rax) (AAReg Rax)
                             emit $ ACmp zp (AAReg l)
                             emit $ ASetNe
                             emit $ AMov (AAReg Rax) (AAReg l)

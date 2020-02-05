@@ -8,6 +8,8 @@ import Prelude hiding ((.), id)
 
 import LatteErrors
 
+import Debug.Trace
+
 import Control.Monad.Identity
 import Control.Monad.Except
 import Control.Monad.Reader
@@ -189,7 +191,7 @@ lookupVar name = do
         Just iName -> case Map.lookup iName mem of
             Just (pos, typ) -> return (iName, typ)
             _ -> throwError $ varUninitialized name
-        Nothing -> error "variables was not give a name?"
+        _ -> throwError $ varUninitialized name
 
 
 lookupFunction :: Ident -> Eval (Type)
