@@ -14,12 +14,10 @@ startsBlock q = case q of
     Quad4 _ (OpCall _) _ _ -> True
     Quad4 _ (OpAllocString _ _) _ _ -> True
 
-    QuadNoAssign (OpJmp _) _ _ -> True
-    QuadNoAssign (OpGoToIfFalse _) _ _ -> True
     _ -> False
 
-endsBlock :: Quad -> Bool
-endsBlock q = case q of
+isJmp :: Quad -> Bool
+isJmp q = case q of
     QuadNoAssign (OpJmp _) _ _ -> True
     QuadNoAssign (OpGoToIfFalse _) _ _ -> True
     _ -> False
@@ -29,8 +27,8 @@ splitIntoBlocksHelper [] [] = []
 splitIntoBlocksHelper cB [] = [cB]
 splitIntoBlocksHelper currentBlock (quad:rest) = case startsBlock quad of
     True -> (currentBlock:(splitIntoBlocksHelper [quad] rest))
-    False -> case endsBlock quad of
-        True -> (quad:currentBlock):(splitIntoBlocksHelper [] rest)
+    False -> case isJmp quad of
+        True -> (currentBlock:[quad]:(splitIntoBlocksHelper [] rest))
         False -> splitIntoBlocksHelper (quad:currentBlock) rest
 
 splitIntoBlocks quads = filter (not. null) $ map reverse (splitIntoBlocksHelper [] quads)

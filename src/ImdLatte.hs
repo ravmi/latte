@@ -178,6 +178,7 @@ whereInMemory var = do
         Nothing -> do
             fl <- lgets firstFree
             update firstFree (fl+1)
+            update varLocations (Map.insert var fl varLocs)
             return $ AAMem fl
 
 
@@ -230,6 +231,11 @@ saveVarsAfterBlock vars = do
     -- TODO can be improved
     whereNow <- mapM (whereVarPreferReg . QaVar) dirtyVars
     whereShould <- mapM whereInMemory dirtyVars
+
+    debug <- trace (show dirtyVars ++ "<<- DIRTY VARS")  lgets addressDesc
+    debug <- trace (show whereNow ++ " <-- WHERE NOW") lgets addressDesc
+    debug <- trace (show whereShould ++ "<<--- where hsould")  lgets addressDesc
+    return $ trace "hehe" 4
 
     mapM_ (emit . APush) whereNow
     mapM_ (emit . APop) (reverse whereShould)
@@ -478,12 +484,15 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
     updateNextUses nextUses
     nuses <- lgets nextUseInfo
 
+    vlocs <- lgets varLocations
+
 
     debugRdesc <- lgets registerDesc
     debugAdesc <- lgets addressDesc
     hehe <- trace ((printQuad q) ++ "<--- QUADBEFORE") (lgets addressDesc)
     hehe <- trace ((show debugRdesc) ++ "<---RDESC") (lgets addressDesc)
     hehe <- trace ((show debugAdesc) ++ "<----ADESC") (lgets addressDesc)
+    hehe <- trace ((show vlocs) ++ "<----QUADMEMORY") (lgets addressDesc)
     hehe <- trace "\n\n\n\n" (lgets addressDesc)
 
 
@@ -581,6 +590,9 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
 quadsToAsm wrappedNextUses aliveBlockEnd = do
     mapM_ (uncurry quadToAsm) wrappedNextUses
     saveVarsAfterBlock aliveBlockEnd
+    memory <- lgets varLocations
+    debug <- trace (show memory ++ "<---- MEM after block")  $ lgets addressDesc
+    return ()
 
 --- translates block of quads to assembly, can modify memory
 runQuadsToAsm :: [Quad] -> [Var] -> Map.Map Var MemoryLocation -> Int-> (Map.Map Var MemoryLocation, Int, [ASM])
@@ -668,7 +680,7 @@ functionToASM (QuadFunction (Ident name) quads argFreeMem args memory) = result 
     blocksToAsm ((i, q):t) mem freeLoc = case Map.lookup i outInfo of
         Just alive -> case runQuadsToAsm q alive mem freeLoc of
             (newMem, newFree, asm1) -> case blocksToAsm t newMem newFree of
-                (asm2, fm2) -> (asm1 ++ asm2, fm2)
+                (asm2, fm2) -> trace (show newMem ++ "<---- NEW MEMORU") (asm1 ++ asm2, fm2)
         Nothing -> error "fatal"
     blocksToAsm [] mem freeLoc = ([], freeLoc)
 
