@@ -25,27 +25,32 @@ import ErrM
   ',' { PT _ (TS _ 10) }
   '-' { PT _ (TS _ 11) }
   '--' { PT _ (TS _ 12) }
-  '/' { PT _ (TS _ 13) }
-  ';' { PT _ (TS _ 14) }
-  '<' { PT _ (TS _ 15) }
-  '<=' { PT _ (TS _ 16) }
-  '=' { PT _ (TS _ 17) }
-  '==' { PT _ (TS _ 18) }
-  '>' { PT _ (TS _ 19) }
-  '>=' { PT _ (TS _ 20) }
-  'boolean' { PT _ (TS _ 21) }
-  'else' { PT _ (TS _ 22) }
-  'false' { PT _ (TS _ 23) }
-  'if' { PT _ (TS _ 24) }
-  'int' { PT _ (TS _ 25) }
-  'return' { PT _ (TS _ 26) }
-  'string' { PT _ (TS _ 27) }
-  'true' { PT _ (TS _ 28) }
-  'void' { PT _ (TS _ 29) }
-  'while' { PT _ (TS _ 30) }
-  '{' { PT _ (TS _ 31) }
-  '||' { PT _ (TS _ 32) }
-  '}' { PT _ (TS _ 33) }
+  '.' { PT _ (TS _ 13) }
+  '/' { PT _ (TS _ 14) }
+  ';' { PT _ (TS _ 15) }
+  '<' { PT _ (TS _ 16) }
+  '<=' { PT _ (TS _ 17) }
+  '=' { PT _ (TS _ 18) }
+  '==' { PT _ (TS _ 19) }
+  '>' { PT _ (TS _ 20) }
+  '>=' { PT _ (TS _ 21) }
+  '[' { PT _ (TS _ 22) }
+  ']' { PT _ (TS _ 23) }
+  'boolean' { PT _ (TS _ 24) }
+  'class' { PT _ (TS _ 25) }
+  'else' { PT _ (TS _ 26) }
+  'false' { PT _ (TS _ 27) }
+  'if' { PT _ (TS _ 28) }
+  'int' { PT _ (TS _ 29) }
+  'new' { PT _ (TS _ 30) }
+  'return' { PT _ (TS _ 31) }
+  'string' { PT _ (TS _ 32) }
+  'true' { PT _ (TS _ 33) }
+  'void' { PT _ (TS _ 34) }
+  'while' { PT _ (TS _ 35) }
+  '{' { PT _ (TS _ 36) }
+  '||' { PT _ (TS _ 37) }
+  '}' { PT _ (TS _ 38) }
 
 L_ident  { PT _ (TV $$) }
 L_integ  { PT _ (TI $$) }
@@ -60,16 +65,23 @@ String  :: { String }  : L_quoted {  $1 }
 
 Program :: { Program }
 Program : ListTopDef { AbsLatte.Program $1 }
-TopDef :: { TopDef }
-TopDef : Type Ident '(' ListArg ')' Block { AbsLatte.FnDef $1 $2 $4 $6 }
 ListTopDef :: { [TopDef] }
 ListTopDef : TopDef { (:[]) $1 } | TopDef ListTopDef { (:) $1 $2 }
+TopDef :: { TopDef }
+TopDef : FnDef { AbsLatte.FnTopDef $1 }
+       | 'class' Ident '{' ListCDeclare '}' { AbsLatte.ClDef $2 (reverse $4) }
+FnDef :: { FnDef }
+FnDef : Type Ident '(' ListArg ')' Block { AbsLatte.FnDef $1 $2 $4 $6 }
 Arg :: { Arg }
 Arg : Type Ident { AbsLatte.Arg $1 $2 }
 ListArg :: { [Arg] }
 ListArg : {- empty -} { [] }
         | Arg { (:[]) $1 }
         | Arg ',' ListArg { (:) $1 $3 }
+Left :: { Left }
+Left : Ident { AbsLatte.Var $1 }
+     | Ident '.' Ident { AbsLatte.SDeref $1 $3 }
+     | Ident '[' Expr ']' { AbsLatte.ADeref $1 $3 }
 Block :: { Block }
 Block : '{' ListStmt '}' { AbsLatte.Block (reverse $2) }
 ListStmt :: { [Stmt] }
@@ -78,7 +90,7 @@ Stmt :: { Stmt }
 Stmt : ';' { AbsLatte.Empty }
      | Block { AbsLatte.BStmt $1 }
      | Type ListItem ';' { AbsLatte.Decl $1 $2 }
-     | Ident '=' Expr ';' { AbsLatte.Ass $1 $3 }
+     | Left '=' Expr ';' { AbsLatte.Ass $1 $3 }
      | Ident '++' ';' { AbsLatte.Incr $1 }
      | Ident '--' ';' { AbsLatte.Decr $1 }
      | 'return' Expr ';' { AbsLatte.Ret $2 }
@@ -101,6 +113,11 @@ ListType :: { [Type] }
 ListType : {- empty -} { [] }
          | Type { (:[]) $1 }
          | Type ',' ListType { (:) $1 $3 }
+Expr7 :: { Expr }
+Expr7 : 'new' Ident { AbsLatte.ENew $2 }
+      | Ident '[' Expr ']' { AbsLatte.EDerefA $1 $3 }
+      | Ident '.' Ident { AbsLatte.EDerefS $1 $3 }
+      | '(' Expr ')' { $2 }
 Expr6 :: { Expr }
 Expr6 : Ident { AbsLatte.EVar $1 }
       | Integer { AbsLatte.ELitInt $1 }
@@ -108,7 +125,7 @@ Expr6 : Ident { AbsLatte.EVar $1 }
       | 'false' { AbsLatte.ELitFalse }
       | Ident '(' ListExpr ')' { AbsLatte.EApp $1 $3 }
       | String { AbsLatte.EString $1 }
-      | '(' Expr ')' { $2 }
+      | Expr7 { $1 }
 Expr5 :: { Expr }
 Expr5 : '-' Expr6 { AbsLatte.Neg $2 }
       | '!' Expr6 { AbsLatte.Not $2 }
@@ -140,6 +157,12 @@ RelOp : '<' { AbsLatte.LTH }
       | '>=' { AbsLatte.GE }
       | '==' { AbsLatte.EQU }
       | '!=' { AbsLatte.NE }
+CDeclare :: { CDeclare }
+CDeclare : Ident Ident { AbsLatte.CDVar $1 $2 }
+         | FnDef { AbsLatte.CDFun $1 }
+ListCDeclare :: { [CDeclare] }
+ListCDeclare : {- empty -} { [] }
+             | ListCDeclare CDeclare { flip (:) $1 $2 }
 {
 
 returnM :: a -> Err a

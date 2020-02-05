@@ -17,10 +17,19 @@ transProgram x = case x of
   Program topdefs -> failure x
 transTopDef :: TopDef -> Result
 transTopDef x = case x of
+  FnTopDef fndef -> failure x
+  ClDef ident cdeclares -> failure x
+transFnDef :: FnDef -> Result
+transFnDef x = case x of
   FnDef type_ ident args block -> failure x
 transArg :: Arg -> Result
 transArg x = case x of
   Arg type_ ident -> failure x
+transLeft :: Left -> Result
+transLeft x = case x of
+  Var ident -> failure x
+  SDeref ident1 ident2 -> failure x
+  ADeref ident expr -> failure x
 transBlock :: Block -> Result
 transBlock x = case x of
   Block stmts -> failure x
@@ -29,7 +38,7 @@ transStmt x = case x of
   Empty -> failure x
   BStmt block -> failure x
   Decl type_ items -> failure x
-  Ass ident expr -> failure x
+  Ass left expr -> failure x
   Incr ident -> failure x
   Decr ident -> failure x
   Ret expr -> failure x
@@ -51,6 +60,9 @@ transType x = case x of
   Fun type_ types -> failure x
 transExpr :: Expr -> Result
 transExpr x = case x of
+  ENew ident -> failure x
+  EDerefA ident expr -> failure x
+  EDerefS ident1 ident2 -> failure x
   EVar ident -> failure x
   ELitInt integer -> failure x
   ELitTrue -> failure x
@@ -81,4 +93,8 @@ transRelOp x = case x of
   GE -> failure x
   EQU -> failure x
   NE -> failure x
+transCDeclare :: CDeclare -> Result
+transCDeclare x = case x of
+  CDVar ident1 ident2 -> failure x
+  CDFun fndef -> failure x
 

@@ -4,13 +4,25 @@ entrypoints Program ;
 
 Program.   Program ::= [TopDef] ;
 
-FnDef.	   TopDef ::= Type Ident "(" [Arg] ")" Block ;
-
 separator nonempty TopDef "" ;
+
+FnTopDef.  TopDef ::= FnDef ;
+
+FnDef.     FnDef ::= Type Ident "(" [Arg] ")" Block ;
 
 Arg. 	   Arg ::= Type Ident;
 
 separator  Arg "," ;
+
+
+-- left side in equation
+
+Var.       Left ::= Ident ;
+ 
+SDeref.    Left ::= Ident "." Ident ;
+
+ADeref.    Left ::= Ident "[" Expr "]" ;
+
 
 -- statements ----------------------------------------------
 
@@ -30,7 +42,7 @@ Init.      Item ::= Ident "=" Expr ;
 
 separator nonempty Item "," ;
 
-Ass.       Stmt ::= Ident "=" Expr  ";" ;
+Ass.       Stmt ::= Left "=" Expr  ";" ;
 
 Incr.      Stmt ::= Ident "++"  ";" ;
 
@@ -64,6 +76,12 @@ separator  Type "," ;
 
 -- Expressions ---------------------------------------------
 
+ENew.      Expr7 ::= "new" Ident ;
+
+EDerefA.   Expr7 ::= Ident "[" Expr "]" ;
+
+EDerefS.   Expr7 ::= Ident "." Ident ;
+
 EVar.      Expr6 ::= Ident ;
 
 ELitInt.   Expr6 ::= Integer ;
@@ -90,7 +108,7 @@ EAnd.      Expr1 ::= Expr2 "&&" Expr1 ;
 
 EOr.       Expr ::= Expr1 "||" Expr ;
 
-coercions  Expr 6 ;
+coercions  Expr 7 ;
 
 separator  Expr "," ;
 
@@ -118,6 +136,17 @@ EQU.       RelOp ::= "==" ;
 
 NE.        RelOp ::= "!=" ;
 
+-- classes -----------
+
+ClDef.     TopDef ::= "class" Ident "{" [CDeclare] "}" ;
+
+CDVar.     CDeclare ::= Ident Ident ;
+
+CDFun.     CDeclare ::= FnDef ;
+
+separator CDeclare "" ;
+
+
 -- comments ------------------------------------------------
 
 comment    "#" ;
@@ -125,4 +154,3 @@ comment    "#" ;
 comment    "//" ;
 
 comment    "/*" "*/" ;
-
