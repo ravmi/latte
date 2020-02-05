@@ -5,7 +5,7 @@ import QuadData
 import NextUses (usedInBlock, definedInBlock)
 import qualified Data.Map as Map
 import Data.List as List
-
+import Debug.Trace
 type Graph = Map.Map Int [Int]
 
 startsBlock :: Quad -> Bool
@@ -13,6 +13,8 @@ startsBlock q = case q of
     QuadNoAssign (OpLabel _) _ _ -> True
     Quad4 _ (OpCall _) _ _ -> True
     Quad4 _ (OpAllocString _ _) _ _ -> True
+    QuadNoAssign (OpJmp _) _ _ -> True
+    QuadNoAssign (OpGoToIfFalse _) _ _ -> True
     _ -> False
 
 endsBlock :: Quad -> Bool
@@ -26,11 +28,11 @@ splitIntoBlocksHelper [] [] = []
 splitIntoBlocksHelper cB [] = [cB]
 splitIntoBlocksHelper currentBlock (quad:rest) = case startsBlock quad of
     True -> (currentBlock:(splitIntoBlocksHelper [quad] rest))
-    False -> case endsBlock quad of
-        True -> (quad:currentBlock):(splitIntoBlocksHelper [] rest)
-        False -> splitIntoBlocksHelper (quad:currentBlock) rest
+    False -> splitIntoBlocksHelper (quad:currentBlock) rest
+    --False -> case endsBlock quad of
+    --    True -> (quad:currentBlock):(splitIntoBlocksHelper [] rest)
 
-splitIntoBlocks quads = map reverse (splitIntoBlocksHelper [] quads)
+splitIntoBlocks quads = filter (not. null) $ map reverse (splitIntoBlocksHelper [] quads)
 
 lookupMany l m = result where
     lookupOne m x = case Map.lookup x m of
@@ -39,9 +41,9 @@ lookupMany l m = result where
     result = concatMap (lookupOne m) l
 
 canGoTo :: (Int, [Quad]) -> (Int, [Quad]) -> Bool
-canGoTo (i1, b1) (i2, b2) = case (last b1, head b2) of
-    (QuadNoAssign (OpGoToIfFalse lab1) _ _, QuadNoAssign (OpLabel lab2) _ _) -> lab1 == lab2
-    (QuadNoAssign (OpJmp lab1) _ _, QuadNoAssign (OpLabel lab2) _ _) -> lab1 == lab2
+canGoTo (i1, b1) (i2, b2) = case (last b1, b2) of
+    (QuadNoAssign (OpGoToIfFalse lab1) _ _, (QuadNoAssign (OpLabel lab2) _ _:_)) -> lab1 == lab2
+    (QuadNoAssign (OpJmp lab1) _ _, ((QuadNoAssign (OpLabel lab2) _ _):_)) -> lab1 == lab2
     _ -> (i1+1) == i2
 
 buildCFG :: [[Quad]] -> Map.Map Int [Int]
@@ -54,6 +56,7 @@ buildCFG blocks = graph where
 cfgHelper1 :: Graph -> Graph -> Graph -> Graph -> Graph -> Int -> (Graph, Graph)
 cfgHelper1 graph useM defM inM outM size = result where
     calcIn n = case (Map.lookup n useM, Map.lookup n outM, Map.lookup n defM) of
+        --(Just nuse, Just nout, Just ndef) -> trace (((show useM) ++ (show defM) ++ (show outM)) ++ (show (n, List.nub (nuse ++ (nout List.\\ ndef))))) (n, List.nub (nuse ++ (nout List.\\ ndef)))
         (Just nuse, Just nout, Just ndef) -> (n, List.nub (nuse ++ (nout List.\\ ndef)))
         _ -> error "buildInout"
     calcOut n = case Map.lookup n graph of
@@ -75,3 +78,6 @@ calcInOut graph blocks = result where
     inM = Map.fromList $ zip [1..size] (repeat [])
     outM = Map.fromList $ zip [1..size] (repeat [])
     result = cfgHelper2 graph useM defM inM outM size
+
+inOutFromBlocks blocks = calcInOut graph blocks where
+    graph = buildCFG blocks

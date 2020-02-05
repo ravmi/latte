@@ -3,9 +3,11 @@ module NextUses where
 import QuadData
 import qualified Data.Map as Map
 import qualified Data.List as List
+import Debug.Trace
 
 type LineNumber = Int
 type NextUsesMap = Map.Map Var LineNumber
+
 
 -- Updates map of next uses to its state from before quadruple
 nextUsesBeforeQuad :: NextUsesMap -> LineNumber -> Quad -> NextUsesMap
@@ -41,7 +43,13 @@ usedInQuad q = result where
         _ -> []
     result = List.nub $ (usedInName y) ++ (usedInName z)
 
-usedInBlock quads = List.nub $ concatMap usedInQuad quads
+usedInBlock b = usedInBlock2 (reverse b) []
+
+usedInBlock2 [] tillNow = tillNow
+usedInBlock2 (q:t) tillNow = usedInBlock2 t newvars where
+    used = usedInQuad q
+    defined = definedInQuad q
+    newvars = List.nub $ (tillNow List.\\ defined) ++ used
 
 
 --- helper function, takes reveresd list with line numbers and returns for each quadruple information about next uses of
@@ -50,9 +58,10 @@ revNextUsesList :: [(LineNumber, Quad)] -> NextUsesMap -> [NextUsesMap]
 revNextUsesList [] nextUses = [nextUses]
 revNextUsesList ((lineNum, q):t) nextUses = result where
     nextUsesBefore = nextUsesBeforeQuad nextUses lineNum q
-    allNames = List.nub $ (definedInQuad q) ++ (usedInQuad q)
-    filterFun k val = elem k allNames
-    result = (Map.filterWithKey filterFun nextUses):(revNextUsesList t nextUsesBefore)
+    --allNames = List.nub $ (definedInQuad q) ++ (usedInQuad q)
+    --filterFun k val = elem k allNames
+    --result = (Map.filterWithKey filterFun nextUses):(revNextUsesList t nextUsesBefore)
+    result = (nextUses:revNextUsesList t nextUsesBefore)
 
 
 -- appends next uses to each line and returns variable alive at the beginning of the block
@@ -63,6 +72,9 @@ appendNextUses quads aliveBlockEnd = result where
     countQuads = length quads
     nextUsesAtTheEnd = Map.fromList $ zip aliveBlockEnd (repeat (countQuads + 1))
     revNextResult = reverse $ revNextUsesList numberedReversed nextUsesAtTheEnd
-    aliveStart = Map.keys $ head revNextResult
+    aliveStart = case revNextResult of
+        (h:_) -> Map.keys h
+        _ -> error "appendNextUses"
     quadsWithUses = zip quads (tail revNextResult)
-    result = (quadsWithUses, aliveStart)
+    --result = trace (show (map snd quadsWithUses) ++ "<--- NEXT USES ALL\n") (quadsWithUses, aliveStart)
+    result =  (quadsWithUses, aliveStart)

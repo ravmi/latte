@@ -29,8 +29,12 @@ import PrintLatte
 import AbsLatte
 import ErrM
 
+import CFG (buildCFG, calcInOut, splitIntoBlocks)
+
 import QuadData
 import ImdLatte (functionToASM)
+
+import System.FilePath.Posix (dropExtension)
 
 
 type Loc = Int
@@ -168,17 +172,22 @@ allocateVar varName varType = do
     insertMemory iName (freeLoc, varType)
     --insertLocations varName freeLoc
     update freeLocation (freeLoc + 1)
-    return freeLoc
+    return iName
 
 
 ----- OK
 lookupVar :: Ident -> Eval (Var, Type)
 lookupVar name = do
-    mem <- lgets memory
     vNames <- lgets varNames
+    mem <- lgets memory
+    --case Map.lookup name vNames of
+    --    Just iName -> case Map.lookup iName mem of
+    --        Just varInfo -> return varInfo
+    --        _ -> throwError $ varUninitialized name
+    --    Nothing -> error "variables was not give a name?"
     case Map.lookup name vNames of
         Just iName -> case Map.lookup iName mem of
-            Just varInfo -> return varInfo
+            Just (pos, typ) -> return (iName, typ)
             _ -> throwError $ varUninitialized name
         Nothing -> error "variables was not give a name?"
 
@@ -226,7 +235,7 @@ translateExpression (EApp funName funArgs) = do
 translateExpression (EString str) = do
     newVar <- newVarName
     sMem <- allocStatic str
-    return $ QaConstStr ("." ++ (show sMem))
+    return $ (QaConstStr ("." ++ (show sMem)), Str)
     -- emit $ Quad4 newVar (OpAllocString sMem (length str + 1)) QaEmpty QaEmpty
     --return $ (QaVar newVar, Str)
 
@@ -256,7 +265,7 @@ translateExpression (EMul e1 op e2) = do
     when (t1 /= Int || t2 /= Int)
         (throwError $ badTypesSuggestion "`*`" [Int, Int] [t1, t2])
     case op of
-        Times -> emit $ Quad4 newVar OpMul r1 r2
+        Times -> emit $ Quad4 newVar OpMul r2 r1
         Mod -> emit $ Quad4 newVar OpMod r1 r2
         Div -> emit $ Quad4 newVar OpDiv r1 r2
     return (QaVar newVar, t1)
@@ -268,7 +277,7 @@ translateExpression (EAdd exp1 Plus exp2) = do
     when(t1 /= t2 || (t1 /= Str && t1 /= Int))
         (throwError $ badTypes "`+`" [t1, t2])
     case t1 of
-        Int -> do emit $ Quad4 newVar OpAdd r1 r2
+        Int -> do emit $ Quad4 newVar OpAdd r2 r1
         Str -> do emit $ Quad4 newVar (OpCall "concatStrings_") (QaList [r1, r2]) QaEmpty
     return (QaVar newVar, t1)
 
@@ -562,6 +571,8 @@ defineFun (FnDef retType funName arguments block) = do
     update expectRetType retType
     --update freeLocation (negate (length argNames))
     mapM_ (uncurry declare) (zip argNames argTypes)
+    xx <- lgets freeLocation
+    update nextVarName (xx + countLocals (block))
     --update freeLocation 0
     runBlock block
     (caughtRet, _) <- lgets caughtRetType
@@ -601,28 +612,44 @@ programToQuadsInMonad (Program defList) = do
 --functionToASM :: QuadFunction -> ([ASM], Int)
 
 
-
-runText :: String -> IO [QuadFunction]
+runText :: String -> IO String
 runText s = let ts = myLexer s in case pProgram ts of
     Bad s -> do hPutStrLn stderr "ERROR"
                 hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
     Ok tree -> case runEval (ProgState Map.empty 0 0 Void (Void, False) [] 1 Map.empty Map.empty 0 0 Map.empty) (programToQuadsInMonad tree) of
-        Right ((qfunctions, static), w) -> do
-            --print tree
-            return $ qfunctions
+        Right ((qfunctions, static), w) -> let
+            globl n = ".globl " ++ n ++ "\n"
+            functionName n = n ++ ":\n"
+            showIndent asm = (intercalate "\n" (map (("    " ++) . show) (functionToASM asm)) ++ "\n")
+            functionToString q@(QuadFunction (Ident fName) quads _ _ _) = (globl fName) ++ (functionName fName) ++ (showIndent q)
+            bCFG ((QuadFunction _ quads _ _ _)) = buildCFG (splitIntoBlocks quads)
+            bInOut q@(QuadFunction _ quads _ _ _) = calcInOut (bCFG q) (splitIntoBlocks quads)
+            getblocks q@(QuadFunction _ quads _ _ _) = splitIntoBlocks quads
+            codeText = concatMap functionToString qfunctions in do
+                print qfunctions
+                putStrLn $ concatMap printQuadFunction qfunctions
+                --print "blocks"
+                --print $ getblocks (head qfunctions)
+                --print "CFG"
+                --print (bCFG $ head qfunctions)
+                --print "INOUT"
+                --print (bInOut $ head qfunctions)
+                putStrLn $ codeText
+                return $ codeText
+
         Left errMessage -> do hPutStrLn stderr errMessage
                               exitFailure
 
-getFilename :: String -> String
-getFilename path = head $ splitOn "." fileName where
-                   fileName = last $ splitOn "/" path
+--getFilename :: String -> String
+--getFilename path = head $ splitOn "." fileName where
+--                   fileName = last $ splitOn "/" path
 
-getDir :: String -> String
-getDir path = intercalate "" dirsNoLast where
-    dirs = splitOn "/" path
-    dirsNoLast = take ((length dirs) - 1) dirs
+--getDir :: String -> String
+--getDir path = intercalate "" dirsNoLast where
+--    dirs = splitOn "/" path
+--    dirsNoLast = take ((length dirs) - 1) dirs
 
 main :: IO ()
 main = do
@@ -630,10 +657,11 @@ main = do
     case args of
         [s] -> do
             code <- readFile s
-            quads <- runText code
-            print quads
+            codeText <- runText code
+            --print quads
             putStrLn $ "OK"
-            --writeFile ((getDir s) ++ "/" ++ (getFilename s) ++ ".s") (translateProgram quads)
+            --writeFile ((getDir s) ++ "/" ++ (takeBaseName s) ++ ".s") (codeText)
+            writeFile ((dropExtension s) ++ ".s") codeText
         _ -> hPutStrLn stderr  "Only one argument!"
 
 

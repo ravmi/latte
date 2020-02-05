@@ -17,6 +17,8 @@ printQa (QaList l) = show l
 data QuadFunction = QuadFunction Ident [Quad] Int Int (Map.Map Int (Int, Type))
     deriving (Eq, Ord, Show, Read)
 
+printQuadFunction (QuadFunction (Ident name) qs a b mem) = (name ++ "\n" ++ intercalate "\n" (map printQuad qs)) ++ "\n" ++ (show mem)
+
 data Quad = Quad4 Var Op QArgument QArgument | QuadNoAssign Op QArgument QArgument
     deriving (Eq, Ord, Read, Show)
 
@@ -68,6 +70,9 @@ printOp OpOr = "or"
 printOp OpAssVar = "."
 printOp OpRet = "return"
 printOp (OpJmp s) = "jmp " ++ s
+printOp (OpCall s) = "call " ++ s
+printOp (OpGoToIfFalse str) = "gotoiffalse " ++ str
+printOp (OpLabel str) = "label: " ++ str
 printOp _ = "not implemented"
 
 type Var = Int

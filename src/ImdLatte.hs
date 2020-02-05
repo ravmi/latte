@@ -20,6 +20,10 @@ import ASM
 import CFG (splitIntoBlocks, buildCFG, calcInOut, Graph)
 import NextUses (appendNextUses)
 import QuadData
+import Debug.Trace
+
+
+import CFG
 
 import Test.QuickCheck
 import Test.QuickCheck.Monadic
@@ -160,7 +164,9 @@ furthestBusyRegister = do
         furthestLine = maximum regNextUseLines
         regsWithLines = zip (Map.keys rdesc) (regNextUseLines)
         allPairsWithFurthestLine = filter ((furthestLine==) . snd) regsWithLines in
-        return $ fst (head allPairsWithFurthestLine)
+        case allPairsWithFurthestLine of
+            (h:_) -> return $ fst h
+            _ -> error "furthestBusy"
 
 
 -----------------------------------
@@ -180,7 +186,7 @@ varDirty var = do
     adesc <- lgets addressDesc
     case Map.lookup var adesc of
         Just (regs, vars) -> return $ not (Set.member var vars)
-        Nothing -> error "wrong var"
+        Nothing -> return True --error "wrong var"
 
 
 --helper, assumes that var is in reg. It makes sure that var is in it's position in memory. reg will hold everything that
@@ -214,11 +220,11 @@ spillReg reg = do
                     spillReg reg
                 [] -> return ()
         Nothing -> return ()
-
+-- TODO bug
 saveVarsAfterBlock :: [Var] -> Eval ()
 saveVarsAfterBlock vars = do
     adesc <- lgets addressDesc
-    rdesc <- lgets registerDesc
+    rdesc <- trace "HERE" $ lgets registerDesc
     dirtyVars <- filterM varDirty vars
 
     -- TODO can be improved
@@ -278,6 +284,7 @@ giveReg (QaVar y) = do
     rdesc <- lgets registerDesc
 
     exclusiveReg <- findExclusiveRegister y
+    debugg <- trace (show exclusiveReg ++ " <- exclreg\n") (lgets addressDesc)
     case (exclusiveReg, Map.lookup y nextUses) of
         (Just reg, Nothing) -> do
             update addressDesc (removeRegFromDescs reg adesc) -- register still holds value, not sure if it's ok
@@ -313,20 +320,26 @@ whereVarPreferReg :: QArgument -> Eval AmdArg
 whereVarPreferReg (QaVar var) = do
     rdesc <- lgets registerDesc
     adesc <- lgets addressDesc
+    mem <- lgets varLocations
     case Map.lookup var adesc of
         Just (regs, vars) -> case Set.null regs of
-            True -> whereInMemory (head $ Set.toList vars)
-            False -> return $ AAReg (head (Set.toList regs))
-        Nothing -> error "var is nowhere"
+            True -> case (List.intersect (Set.toList vars) (Map.keys mem)) of
+                (h:_) -> whereInMemory h
+                _ -> error "whereVarPreferReg1"
+            False -> case (Set.toList regs) of
+                (h:_) -> return $ AAReg h
+                _ -> error "whereVarPreferRegs2"
+        Nothing -> trace (show var ++ (show adesc)) (error "var is nowhere")
 
 whereVarPreferReg (QaConst c) = return $ AAConst c
-whereVarPreferReg (QaConstStr c) = return $ AAConst c
+whereVarPreferReg (QaConstStr str) = return $ AAConstStr str
 
 
 updateNextUses :: (Map.Map Var NextUse) -> Eval ()
 updateNextUses newInfo = do
     oldInfo <- lgets nextUseInfo
-    update nextUseInfo (Map.union newInfo oldInfo)
+    update nextUseInfo (newInfo)
+    --update nextUseInfo (Map.union newInfo oldInfo)
 
 
 forgetIfUnused :: QArgument -> Eval ()
@@ -369,6 +382,7 @@ forgetIfUnused y = do
 ---
 quadToAsm (QuadNoAssign OpRet QaEmpty QaEmpty) nu = do
     updateNextUses nu
+    emit ALeave
     emit ARet
 
 quadToAsm (QuadNoAssign OpRet arg QaEmpty) nu = do
@@ -378,6 +392,7 @@ quadToAsm (QuadNoAssign OpRet arg QaEmpty) nu = do
         _ -> do
             wm <- whereVarPreferReg arg
             emit $ AMov wm (AAReg Rax)
+            emit ALeave
             emit ARet
 
 quadToAsm (QuadNoAssign (OpJmp label) QaEmpty QaEmpty) nu = do
@@ -389,6 +404,7 @@ quadToAsm (QuadNoAssign (OpLabel label) QaEmpty QaEmpty) nu = do
     emit $ ALab label
 
 quadToAsm (QuadNoAssign (OpGoToIfFalse label) arg1 QaEmpty) nu = do
+    debug <- trace ("qasm") lgets addressDesc
     whereArg <- whereVarPreferReg arg1
     emit $ ACmp (AAConst 1) whereArg
     emit $ AJmpNe label
@@ -448,20 +464,53 @@ quadToAsm (Quad4 x (OpAssVar) (QaConst y) _) nu = do
     adesc <- lgets addressDesc
     update addressDesc (Map.insert x (Set.empty, Set.singleton x) adesc)
 
+quadToAsm (Quad4 x (OpAssVar) (QaConstStr y) _) nu = do
+    updateNextUses nu
+    whereX <- whereInMemory x
+    emit $ AMov (AAConstStr y) whereX
+    forgetVarFromRegDesc x
+    forgetVarFromAddDesc x
+    adesc <- lgets addressDesc
+    update addressDesc (Map.insert x (Set.empty, Set.singleton x) adesc)
+
 quadToAsm q@(Quad4 x op y z) nextUses = do
     rdesc <- lgets registerDesc
     updateNextUses nextUses
+    nuses <- lgets nextUseInfo
+
+
+    debugRdesc <- lgets registerDesc
+    debugAdesc <- lgets addressDesc
+    hehe <- trace ((printQuad q) ++ "<--- QUADBEFORE") (lgets addressDesc)
+    hehe <- trace ((show debugRdesc) ++ "<---RDESC") (lgets addressDesc)
+    hehe <- trace ((show debugAdesc) ++ "<----ADESC") (lgets addressDesc)
+    hehe <- trace "\n\n\n\n" (lgets addressDesc)
+
+
+
     case Map.lookup x nextUses of
         Just xline -> do
             l <- giveReg y
+            debugg <- trace ((show nuses) ++ " <--- NEXT USEs\n") (lgets addressDesc)
+            debugg <- trace (show l ++ "<- GIVRrEG\n") (lgets addressDesc)
+            --case y of
+            --    QaVar i -> do
+            --        forgetVarFromRegDesc i
+            --        forgetVarFromAddDesc i
+            --    _ -> return ()
             case y of
                 QaVar vy -> case (Just $ Set.singleton vy) /= (Map.lookup l rdesc) of
                     True -> do
-                        emit $ AMov (AAMem vy) (AAReg l)
---                        update registerDesc (Map.insert l (Set.singleton vy) rdesc)
---                        addressDescInsertRegister vy l
+                        whereY <- whereVarPreferReg y
+                        emit $ AMov whereY (AAReg l)
+                        --update registerDesc (Map.insert l (Set.singleton vy) rdesc)
+                        --addressDescInsertRegister vy l
                     False -> return ()
-                QaConst cy -> return ()
+                QaConst cy -> do
+                    emit $ AMov (AAConst cy) (AAReg l)
+                QaConstStr cy -> do
+                    emit $ AMov (AAConstStr cy) (AAReg l)
+            -- there we should be sure that y is in new safe register, is is not marked as busy though
             case z of
                 _ -> do
                     zp <- whereVarPreferReg z
@@ -472,7 +521,13 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                         (zarg, OpDiv) -> do
                             emit $ AMov (AAReg l) (AAReg Rax)
                             emit $ ACdq
-                            emit $ ADiv zarg
+                            case zarg of
+                                AAConst czarg -> do
+                                    regzarg <- giveReg z
+                                    emit $ AMov zarg (AAReg regzarg)
+                                    emit $ ADiv (AAReg regzarg)
+                                _ -> do
+                                    emit $ ADiv zarg
                             emit $ AMov (AAReg Rax) (AAReg l)
                         (zarg, OpMod) -> do
                             emit $ AMov (AAReg l) (AAReg Rax)
@@ -483,6 +538,7 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                         (zarg, OpAnd) -> emit $ AAnd zarg (AAReg l)
                         (zarg, OpOr) -> emit $ AOr zarg (AAReg l)
                         (zarg, OpCmpIntLt) -> do
+                            emit $ AXor (AAReg Rax) (AAReg Rax)
                             emit $ ACmp zp (AAReg l)
                             emit $ ASetLt
                             emit $ AMov (AAReg Rax) (AAReg l)
@@ -508,11 +564,19 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                             emit $ AMov (AAReg Rax) (AAReg l)
 
             adesc <- lgets addressDesc
+            rdesc2 <- lgets registerDesc
             update addressDesc (Map.insert x (Set.singleton l, Set.empty) adesc)
-            update registerDesc (compose rdesc [removeFromAllSets x, Map.insert l (Set.singleton x)])
+            update registerDesc (compose rdesc2 [removeFromAllSets x, Map.insert l (Set.singleton x)])
             mapM_ forgetIfUnused [y, z]
-        Nothing -> return ()
+            debugRdesc <- lgets registerDesc
+            debugAdesc <- lgets addressDesc
+            hehe <- trace ((printQuad q) ++ "<--- QUADAFTER") (lgets addressDesc)
+            hehe <- trace ((show debugRdesc) ++ "<---RDESC") (lgets addressDesc)
+            hehe <- trace ((show debugAdesc) ++ "<----ADESC") (lgets addressDesc)
+            hehe <- trace "\n\n\n\n" (lgets addressDesc)
+            return ()
 
+        Nothing -> return ()
 
 quadsToAsm wrappedNextUses aliveBlockEnd = do
     mapM_ (uncurry quadToAsm) wrappedNextUses
@@ -528,7 +592,8 @@ runQuadsToAsm quads aliveBlockEnd varLocs fFree =
         initFirstFree = fFree
         initNextUseInfo = Map.empty
         initVarLocations = varLocs
-        (wrapNextUses, aliveStart) = appendNextUses quads aliveBlockEnd
+        (wrapNextUses, aliveStart) =  appendNextUses quads aliveBlockEnd
+        --(wrapNextUses, aliveStart) = trace (show (appendNextUses quads aliveBlockEnd)  ++ "<-appendNetxUses\n") appendNextUses quads aliveBlockEnd
         pState = QuadProgState initAddressDesc initRegisterDesc initFirstFree initNextUseInfo initVarLocations
         evalResult = runEval pState (quadsToAsm wrapNextUses aliveBlockEnd) in
         case evalResult of
@@ -570,16 +635,16 @@ runQuadsToAsm quads aliveBlockEnd varLocs fFree =
 
 --TODO fix this
 loadArgument i = case i of
-    0 -> AMov (AAReg Rdi) (AAMem 0)
-    1 -> AMov (AAReg Rsi) (AAMem 1)
-    2 -> AMov (AAReg Rdx) (AAMem 2)
-    3 -> AMov (AAReg Rcx) (AAMem 3)
-    4 -> AMov (AAReg R8) (AAMem 4)
-    5 -> AMov (AAReg R9) (AAMem 5)
-    i -> APop (AAMem i)
+    0 -> [AMov (AAReg Rdi) (AAMem 0)]
+    1 -> [AMov (AAReg Rsi) (AAMem 1)]
+    2 -> [AMov (AAReg Rdx) (AAMem 2)]
+    3 -> [AMov (AAReg Rcx) (AAMem 3)]
+    4 -> [AMov (AAReg R8) (AAMem 4)]
+    5 -> [AMov (AAReg R9) (AAMem 5)]
+    i -> [AMov (AAMem (5-i)) (AAReg Rax), AMov (AAReg Rax) (AAMem i)]
 
 loadArguments :: Int -> [ASM]
-loadArguments args = map loadArgument [0..(args-1)]
+loadArguments args = concatMap loadArgument [0..(args-1)]
 
 --- MAIN function
 --- returns assembly and the number of vars to allocate on stack
@@ -588,15 +653,15 @@ loadArguments args = map loadArgument [0..(args-1)]
 functionToASM :: QuadFunction -> [ASM]
 functionToASM (QuadFunction (Ident name) quads argFreeMem args memory) = result where
     prolog = [APush (AAReg Rbp), AMov (AAReg Rsp) (AAReg Rbp)]
-    loadArgs = loadArguments args
+    loadArgs = trace "HERE" loadArguments args
     epilog = [ALeave]
 
-    varsInMemory = Map.keys memory
+    varsInMemory = trace "HEHRERERHE" Map.keys memory
     aDescVals = zip (repeat Set.empty) (map Set.singleton varsInMemory)
     addressDesc = Map.fromList $ zip varsInMemory aDescVals
 
     blocks = splitIntoBlocks quads
-    numberedBlocks = zip [1..] blocks
+    numberedBlocks = trace (show blocks) $ zip [1..] blocks
     graph = buildCFG blocks
     (inInfo, outInfo) = calcInOut graph blocks
 
@@ -612,7 +677,9 @@ functionToASM (QuadFunction (Ident name) quads argFreeMem args memory) = result 
 
 
     (asm, freeMem) = blocksToAsm (zip [1..] blocks) (shortMem) (argFreeMem)
-    allocMemory = [ASub (AAConst (8 * freeMem)) (AAReg Rsp)]
+    allocMemory = case freeMem of
+        0 -> []
+        _ -> [ASub (AAConst (8 * freeMem)) (AAReg Rsp)]
     resultAsm = prolog ++ allocMemory ++ loadArgs ++ asm ++ epilog
     result = resultAsm
 
@@ -623,9 +690,14 @@ hehe2 = QuadFunction (Ident "s") [Quad4 1 OpAssVar (QaConst 1) QaEmpty,Quad4 2 O
 hehe3 = QuadFunction (Ident "s") [Quad4 1 OpAssVar (QaConst 1) QaEmpty,Quad4 2 OpAssVar (QaVar 1) QaEmpty,Quad4 3 OpAdd (QaVar 2) (QaVar 1),QuadNoAssign OpRet (QaVar 3) QaEmpty] 3 0 (Map.fromList [(1,(1,Int)),(2,(2,Int))])
 hehe4 = QuadFunction (Ident "s") [Quad4 2 OpAssVar (QaVar 1) QaEmpty,Quad4 3 OpAdd (QaVar 2) (QaVar 1),QuadNoAssign OpRet (QaVar 3) QaEmpty] 2 1 (Map.fromList [(1,(0,Int)),(2,(1,Int))])
 hehe5 = QuadFunction (Ident "s") [Quad4 1 OpAssVar (QaVar 0) QaEmpty,Quad4 2 OpAdd (QaVar 0) (QaVar 1),QuadNoAssign OpRet (QaVar 2) QaEmpty] 2 1 (Map.fromList [(0,(0,Int)),(1,(1,Int))])
+hehe6 = QuadFunction (Ident "f") [Quad4 16 OpMul (QaVar 6) (QaVar 7),Quad4 15 OpMul (QaVar 16) (QaVar 8),Quad4 14 OpMul (QaVar 15) (QaVar 9),Quad4 13 OpMul (QaVar 14) (QaVar 10),Quad4 12 OpSub (QaVar 13) (QaVar 11),QuadNoAssign OpRet (QaVar 12) QaEmpty] 12 12 (Map.fromList [(0,(0,Int)),(1,(1,Int)),(2,(2,Int)),(3,(3,Int)),(4,(4,Int)),(5,(5,Int)),(6,(6,Int)),(7,(7,Int)),(8,(8,Int)),(9,(9,Int)),(10,(10,Int)),(11,(11,Int))])
 r = functionToASM hehe
 r1 = functionToASM hehe1
 r2 = functionToASM hehe2
 r3 = functionToASM hehe3
 r4 = functionToASM hehe4
 r5 = functionToASM hehe5
+r6 = functionToASM hehe6
+
+
+--- TODO napraw argument w funkcjach

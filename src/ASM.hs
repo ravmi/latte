@@ -5,7 +5,7 @@ import Data.List (intercalate)
 data Reg = Rax | Rbx | Rcx | Rdx | Rsi | Rdi | R8 | R9 | R10 | R11 | Rsp | Rbp
     deriving (Eq, Ord, Read)
 
-data AmdArg = AAReg Reg | AAMem Int | AAConst Int
+data AmdArg = AAReg Reg | AAMem Int | AAConst Int | AAConstStr String
     deriving (Eq, Ord, Read)
 
 data ASM = APush AmdArg
@@ -15,6 +15,7 @@ data ASM = APush AmdArg
          | AAdd AmdArg AmdArg
          | AMul AmdArg AmdArg
          | ADiv AmdArg
+         | AXor AmdArg AmdArg
          | AAnd AmdArg AmdArg
          | AOr AmdArg AmdArg
          | AMov AmdArg AmdArg
@@ -46,15 +47,20 @@ instance Show Reg where
     show R8 = "%r8"
     show R9 = "%r9"
     show R10 = "%r10"
+    show R11 = "%r11"
     show Rsp = "%rsp"
     show Rbp = "%rbp"
 
 instance Show AmdArg where
     show (AAReg r) = show r
-    show (AAMem i) = result where
-        position = show $ -(8 * (i + 1))
-        result = position ++ "(%rbp)"
+    show (AAMem i) = let
+        pos1 = show $ -(8 * (i + 1))
+        pos2 = show $ (1-i) * 8 in
+        case (i >= 0) of
+            True -> pos1 ++ "(%rbp)"
+            False -> pos2 ++ "(%rbp)"
     show (AAConst i) = "$" ++ (show i)
+    show (AAConstStr str) = show str
 
 
 -- show comma separated
@@ -67,12 +73,13 @@ instance Show ASM where
     show (ANeg arg) = "negq " ++ (show arg)
     show (ASub arg1 arg2) = "subq " ++ (scs [arg1, arg2])
     show (AAdd arg1 arg2) = "addq " ++ (scs [arg1, arg2])
-    show (AMul arg1 arg2) = "mulq " ++ (scs [arg1, arg2])
-    show (ADiv arg) = "divq " ++ (show arg)
+    show (AMul arg1 arg2) = "imulq " ++ (scs [arg1, arg2])
+    show (ADiv arg) = "idivq " ++ (show arg)
     show (AAnd arg1 arg2) = "andq " ++ (scs [arg1, arg2])
     show (AOr arg1 arg2) = "orq " ++ (scs [arg1, arg2])
     show (AMov arg1 arg2) = "movq " ++ (scs [arg1, arg2])
     show (ACmp arg1 arg2) = "cmpq " ++ (scs [arg1, arg2])
+    show (AXor arg1 arg2) = "xorq " ++ (scs [arg1, arg2])
     show (ACdq) = "cdq"
     show (ARet) = "ret"
     show (ALab lname) = "." ++ lname ++ ":"
