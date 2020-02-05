@@ -74,7 +74,7 @@ appendNextUses quads aliveBlockEnd = result where
     revNextResult = reverse $ revNextUsesList numberedReversed nextUsesAtTheEnd
     aliveStart = case revNextResult of
         (h:_) -> Map.keys h
-        _ -> error "appendNextUses"
+        _ -> error "appendNextUses" Map.keys $ head revNextResult
     quadsWithUses = zip quads (tail revNextResult)
     --result = trace (show (map snd quadsWithUses) ++ "<--- NEXT USES ALL\n") (quadsWithUses, aliveStart)
     result =  (quadsWithUses, aliveStart)
