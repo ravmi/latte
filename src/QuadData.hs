@@ -51,6 +51,26 @@ data Op
     | OpAllocString Int Int
     | OpLabel String
     | OpCall String
+
+    -- x (OpLoadFromHeap size) where _: loads *where to a temporary value (doesn't change memory)
+    | OpLoadFromHeap --usefful (%rax)
+
+    -- x OpWhereOnHeap t i: calculates where t[i] is in the memory
+    | OpWhereOnHeap
+
+
+
+
+    -- OpSaveToHeap where what: saves what to *where (remember that all are ints/indexes)
+    | OpSaveToHeap
+
+
+
+
+    -- x (OpAssFromHeap size) where _: loads *where or t.i from memory and saves it to memory where x is
+    | OpAssFromHeap -- probably unnecessary and can use assignment for nomal variables
+    --
+    -- alloc
     deriving (Eq, Ord, Read, Show)
 
 printOp (OpAdd) = "+"
