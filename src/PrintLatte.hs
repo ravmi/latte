@@ -103,7 +103,7 @@ instance Print Arg where
   prtList _ [] = (concatD [])
   prtList _ [x] = (concatD [prt 0 x])
   prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])
-instance Print Left where
+instance Print LeftEq where
   prt i e = case e of
     Var id -> prPrec i 0 (concatD [prt 0 id])
     SDeref id1 id2 -> prPrec i 0 (concatD [prt 0 id1, doc (showString "."), prt 0 id2])
@@ -118,7 +118,7 @@ instance Print Stmt where
     Empty -> prPrec i 0 (concatD [doc (showString ";")])
     BStmt block -> prPrec i 0 (concatD [prt 0 block])
     Decl type_ items -> prPrec i 0 (concatD [prt 0 type_, prt 0 items, doc (showString ";")])
-    Ass left expr -> prPrec i 0 (concatD [prt 0 left, doc (showString "="), prt 0 expr, doc (showString ";")])
+    Ass lefteq expr -> prPrec i 0 (concatD [prt 0 lefteq, doc (showString "="), prt 0 expr, doc (showString ";")])
     Incr id -> prPrec i 0 (concatD [prt 0 id, doc (showString "++"), doc (showString ";")])
     Decr id -> prPrec i 0 (concatD [prt 0 id, doc (showString "--"), doc (showString ";")])
     Ret expr -> prPrec i 0 (concatD [doc (showString "return"), prt 0 expr, doc (showString ";")])
@@ -141,13 +141,14 @@ instance Print Type where
     Str -> prPrec i 0 (concatD [doc (showString "string")])
     Bool -> prPrec i 0 (concatD [doc (showString "boolean")])
     Void -> prPrec i 0 (concatD [doc (showString "void")])
+    CType id -> prPrec i 0 (concatD [prt 0 id])
     Fun type_ types -> prPrec i 0 (concatD [prt 0 type_, doc (showString "("), prt 0 types, doc (showString ")")])
   prtList _ [] = (concatD [])
   prtList _ [x] = (concatD [prt 0 x])
   prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])
 instance Print Expr where
   prt i e = case e of
-    ENew id -> prPrec i 7 (concatD [doc (showString "new"), prt 0 id])
+    ENew type_ -> prPrec i 7 (concatD [doc (showString "new"), prt 0 type_])
     EDerefA id expr -> prPrec i 7 (concatD [prt 0 id, doc (showString "["), prt 0 expr, doc (showString "]")])
     EDerefS id1 id2 -> prPrec i 7 (concatD [prt 0 id1, doc (showString "."), prt 0 id2])
     EVar id -> prPrec i 6 (concatD [prt 0 id])
@@ -188,7 +189,7 @@ instance Print RelOp where
 
 instance Print CDeclare where
   prt i e = case e of
-    CDVar id1 id2 -> prPrec i 0 (concatD [prt 0 id1, prt 0 id2])
+    CDVar type_ id -> prPrec i 0 (concatD [prt 0 type_, prt 0 id])
     CDFun fndef -> prPrec i 0 (concatD [prt 0 fndef])
   prtList _ [] = (concatD [])
   prtList _ (x:xs) = (concatD [prt 0 x, prt 0 xs])

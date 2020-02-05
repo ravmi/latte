@@ -17,11 +17,11 @@ separator  Arg "," ;
 
 -- left side in equation
 
-Var.       Left ::= Ident ;
+Var.       LeftEq ::= Ident ;
  
-SDeref.    Left ::= Ident "." Ident ;
+SDeref.    LeftEq ::= Ident "." Ident ;
 
-ADeref.    Left ::= Ident "[" Expr "]" ;
+ADeref.    LeftEq ::= Ident "[" Expr "]" ;
 
 
 -- statements ----------------------------------------------
@@ -42,7 +42,7 @@ Init.      Item ::= Ident "=" Expr ;
 
 separator nonempty Item "," ;
 
-Ass.       Stmt ::= Left "=" Expr  ";" ;
+Ass.       Stmt ::= LeftEq "=" Expr  ";" ;
 
 Incr.      Stmt ::= Ident "++"  ";" ;
 
@@ -70,13 +70,15 @@ Bool.      Type ::= "boolean" ;
 
 Void.      Type ::= "void" ;
 
+CType.      Type ::= Ident ;
+
 internal   Fun. Type ::= Type "(" [Type] ")" ;
 
 separator  Type "," ;
 
 -- Expressions ---------------------------------------------
 
-ENew.      Expr7 ::= "new" Ident ;
+ENew.      Expr7 ::= "new" Type ;
 
 EDerefA.   Expr7 ::= Ident "[" Expr "]" ;
 
@@ -140,7 +142,7 @@ NE.        RelOp ::= "!=" ;
 
 ClDef.     TopDef ::= "class" Ident "{" [CDeclare] "}" ;
 
-CDVar.     CDeclare ::= Ident Ident ;
+CDVar.     CDeclare ::= Type Ident ;
 
 CDFun.     CDeclare ::= FnDef ;
 

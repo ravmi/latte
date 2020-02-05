@@ -25,8 +25,8 @@ transFnDef x = case x of
 transArg :: Arg -> Result
 transArg x = case x of
   Arg type_ ident -> failure x
-transLeft :: Left -> Result
-transLeft x = case x of
+transLeftEq :: LeftEq -> Result
+transLeftEq x = case x of
   Var ident -> failure x
   SDeref ident1 ident2 -> failure x
   ADeref ident expr -> failure x
@@ -38,7 +38,7 @@ transStmt x = case x of
   Empty -> failure x
   BStmt block -> failure x
   Decl type_ items -> failure x
-  Ass left expr -> failure x
+  Ass lefteq expr -> failure x
   Incr ident -> failure x
   Decr ident -> failure x
   Ret expr -> failure x
@@ -57,10 +57,11 @@ transType x = case x of
   Str -> failure x
   Bool -> failure x
   Void -> failure x
+  CType ident -> failure x
   Fun type_ types -> failure x
 transExpr :: Expr -> Result
 transExpr x = case x of
-  ENew ident -> failure x
+  ENew type_ -> failure x
   EDerefA ident expr -> failure x
   EDerefS ident1 ident2 -> failure x
   EVar ident -> failure x
@@ -95,6 +96,6 @@ transRelOp x = case x of
   NE -> failure x
 transCDeclare :: CDeclare -> Result
 transCDeclare x = case x of
-  CDVar ident1 ident2 -> failure x
+  CDVar type_ ident -> failure x
   CDFun fndef -> failure x
 

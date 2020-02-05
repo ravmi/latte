@@ -78,10 +78,10 @@ ListArg :: { [Arg] }
 ListArg : {- empty -} { [] }
         | Arg { (:[]) $1 }
         | Arg ',' ListArg { (:) $1 $3 }
-Left :: { Left }
-Left : Ident { AbsLatte.Var $1 }
-     | Ident '.' Ident { AbsLatte.SDeref $1 $3 }
-     | Ident '[' Expr ']' { AbsLatte.ADeref $1 $3 }
+LeftEq :: { LeftEq }
+LeftEq : Ident { AbsLatte.Var $1 }
+       | Ident '.' Ident { AbsLatte.SDeref $1 $3 }
+       | Ident '[' Expr ']' { AbsLatte.ADeref $1 $3 }
 Block :: { Block }
 Block : '{' ListStmt '}' { AbsLatte.Block (reverse $2) }
 ListStmt :: { [Stmt] }
@@ -90,7 +90,7 @@ Stmt :: { Stmt }
 Stmt : ';' { AbsLatte.Empty }
      | Block { AbsLatte.BStmt $1 }
      | Type ListItem ';' { AbsLatte.Decl $1 $2 }
-     | Left '=' Expr ';' { AbsLatte.Ass $1 $3 }
+     | LeftEq '=' Expr ';' { AbsLatte.Ass $1 $3 }
      | Ident '++' ';' { AbsLatte.Incr $1 }
      | Ident '--' ';' { AbsLatte.Decr $1 }
      | 'return' Expr ';' { AbsLatte.Ret $2 }
@@ -109,12 +109,13 @@ Type : 'int' { AbsLatte.Int }
      | 'string' { AbsLatte.Str }
      | 'boolean' { AbsLatte.Bool }
      | 'void' { AbsLatte.Void }
+     | Ident { AbsLatte.CType $1 }
 ListType :: { [Type] }
 ListType : {- empty -} { [] }
          | Type { (:[]) $1 }
          | Type ',' ListType { (:) $1 $3 }
 Expr7 :: { Expr }
-Expr7 : 'new' Ident { AbsLatte.ENew $2 }
+Expr7 : 'new' Type { AbsLatte.ENew $2 }
       | Ident '[' Expr ']' { AbsLatte.EDerefA $1 $3 }
       | Ident '.' Ident { AbsLatte.EDerefS $1 $3 }
       | '(' Expr ')' { $2 }
@@ -158,7 +159,7 @@ RelOp : '<' { AbsLatte.LTH }
       | '==' { AbsLatte.EQU }
       | '!=' { AbsLatte.NE }
 CDeclare :: { CDeclare }
-CDeclare : Ident Ident { AbsLatte.CDVar $1 $2 }
+CDeclare : Type Ident { AbsLatte.CDVar $1 $2 }
          | FnDef { AbsLatte.CDFun $1 }
 ListCDeclare :: { [CDeclare] }
 ListCDeclare : {- empty -} { [] }

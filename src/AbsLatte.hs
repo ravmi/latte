@@ -20,7 +20,7 @@ data FnDef = FnDef Type Ident [Arg] Block
 data Arg = Arg Type Ident
   deriving (Eq, Ord, Show, Read)
 
-data Left = Var Ident | SDeref Ident Ident | ADeref Ident Expr
+data LeftEq = Var Ident | SDeref Ident Ident | ADeref Ident Expr
   deriving (Eq, Ord, Show, Read)
 
 data Block = Block [Stmt]
@@ -30,7 +30,7 @@ data Stmt
     = Empty
     | BStmt Block
     | Decl Type [Item]
-    | Ass Left Expr
+    | Ass LeftEq Expr
     | Incr Ident
     | Decr Ident
     | Ret Expr
@@ -44,11 +44,11 @@ data Stmt
 data Item = NoInit Ident | Init Ident Expr
   deriving (Eq, Ord, Show, Read)
 
-data Type = Int | Str | Bool | Void | Fun Type [Type]
+data Type = Int | Str | Bool | Void | CType Ident | Fun Type [Type]
   deriving (Eq, Ord, Show, Read)
 
 data Expr
-    = ENew Ident
+    = ENew Type
     | EDerefA Ident Expr
     | EDerefS Ident Ident
     | EVar Ident
@@ -75,6 +75,6 @@ data MulOp = Times | Div | Mod
 data RelOp = LTH | LE | GTH | GE | EQU | NE
   deriving (Eq, Ord, Show, Read)
 
-data CDeclare = CDVar Ident Ident | CDFun FnDef
+data CDeclare = CDVar Type Ident | CDFun FnDef
   deriving (Eq, Ord, Show, Read)
 
