@@ -21,7 +21,7 @@ import CFG (splitIntoBlocks, buildCFG, calcInOut, Graph)
 import NextUses (appendNextUses)
 import QuadData
 import Debug.Trace
-
+import GarbageCollector (collectGarbageBlock)
 
 import CFG
 
@@ -155,7 +155,6 @@ nextRegisterUse reg = do
 
 -- it assumes that all registers hold some vars (spilling)
 -- finds the register which holds variable that is used as last
--- TODO test it
 furthestBusyRegister = do
     rdesc <- lgets registerDesc
     varUses <- lgets nextUseInfo
@@ -221,7 +220,6 @@ spillReg reg = do
                     spillReg reg
                 [] -> return ()
         Nothing -> return ()
--- TODO bug
 
 
 saveVarsAfterBlock :: [Var] -> Eval ()
@@ -230,7 +228,6 @@ saveVarsAfterBlock vars = do
     rdesc <- trace "HERE" $ lgets registerDesc
     dirtyVars <- filterM varDirty vars
 
-    -- TODO can be improved
     whereNow <- mapM (whereVarPreferReg . QaVar) dirtyVars
     whereShould <- mapM whereOrAlloc dirtyVars
 
@@ -310,7 +307,7 @@ giveReg arg = let
         case workingRegisters List.\\ (Map.keys rdesc) of -- check if there are any free registers
             (reg:_) -> return reg
             [] -> do
-                reg <- furthestBusyRegister --TODO perhaps fix it, beacause the implemention is old
+                reg <- furthestBusyRegister
                 spillReg reg
                 return reg in
     case arg of
@@ -364,30 +361,17 @@ forgetIfUnused y = do
                 update registerDesc (removeFromAllSets var rdesc)
         (QaConst c) -> return ()
         (QaConstStr _) -> return ()
+        (QaEmpty) -> return ()
 
 
+quadToAsm (QuadNoAssign OpSaveToHeap wher what) nu = do
+    updateNextUses nu
+    varWhere <- whereVarPreferReg wher
+    varWhat <- whereVarPreferReg what
+    emit $ AMov varWhere (AAReg Rax)
+    emit $ AMov varWhat (AAReg Rdx)
+    emit $ ASave (AAReg Rdx) (AAReg Rax)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
----
---- Translating single quadruple to assembly
----
 quadToAsm (QuadNoAssign OpRet QaEmpty QaEmpty) nu = do
     updateNextUses nu
     emit ALeave
@@ -416,6 +400,12 @@ quadToAsm (QuadNoAssign (OpGoToIfFalse label) arg1 QaEmpty) nu = do
     whereArg <- whereVarPreferReg arg1
     emit $ ACmp (AAConst 1) whereArg
     emit $ AJmpNe label
+
+quadToAsm (QuadNoAssign (OpGoToIfTrue label) arg1 QaEmpty) nu = do
+    debug <- trace ("qasm") lgets addressDesc
+    whereArg <- whereVarPreferReg arg1
+    emit $ ACmp (AAConst 1) whereArg
+    emit $ AJmpE label
 
 quadToAsm (Quad4 x (OpAllocString pos len) QaEmpty QaEmpty) nu = do
     error "TODO"
@@ -475,7 +465,8 @@ quadToAsm (Quad4 x (OpAssVar) (QaConst y) _) nu = do
 quadToAsm (Quad4 x (OpAssVar) (QaConstStr y) _) nu = do
     updateNextUses nu
     whereX <- whereOrAlloc x
-    emit $ AMov (AAConstStr y) whereX
+    emit $ AMov (AAConstStr y) (AAReg Rax)
+    emit $ AMov (AAReg Rax) whereX
     forgetVarFromRegDesc x
     forgetVarFromAddDesc x
     adesc <- lgets addressDesc
@@ -522,7 +513,9 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                 QaConstStr cy -> do
                     emit $ AMov (AAConstStr cy) (AAReg l)
             -- there we should be sure that y is in new safe register, is is not marked as busy though
-            case z of
+            case (z, op) of
+                (QaEmpty, OpLoadFromHeap) -> emit $ ALoad (AAReg l) (AAReg l)
+                (QaEmpty, OpNeg) -> emit $ ANeg (AAReg l)
                 _ -> do
                     zp <- whereVarPreferReg z
                     case (zp, op) of
@@ -543,9 +536,14 @@ quadToAsm q@(Quad4 x op y z) nextUses = do
                         (zarg, OpMod) -> do
                             emit $ AMov (AAReg l) (AAReg Rax)
                             emit $ ACdq
-                            emit $ ADiv zarg
+                            case zarg of
+                                AAConst czarg -> do
+                                    regzarg <- giveReg z
+                                    emit $ AMov zarg (AAReg regzarg)
+                                    emit $ ADiv (AAReg regzarg)
+                                _ -> do
+                                    emit $ ADiv zarg
                             emit $ AMov (AAReg Rdx) (AAReg l)
-                        (zarg, OpNeg) -> emit $ ANeg (AAReg l)
                         (zarg, OpAnd) -> emit $ AAnd zarg (AAReg l)
                         (zarg, OpOr) -> emit $ AOr zarg (AAReg l)
                         (zarg, OpCmpIntLt) -> do
@@ -673,7 +671,7 @@ functionToASM :: QuadFunction -> [ASM]
 functionToASM (QuadFunction (Ident name) quads argFreeMem args memory) = result where
     prolog = [APush (AAReg Rbp), AMov (AAReg Rsp) (AAReg Rbp)]
     loadArgs = trace "HERE" loadArguments args
-    epilog = [ALeave]
+    epilog = [ALeave, ARet]
 
     varsInMemory = trace "HEHRERERHE" Map.keys memory
     aDescVals = zip (repeat Set.empty) (map Set.singleton varsInMemory)
@@ -685,7 +683,7 @@ functionToASM (QuadFunction (Ident name) quads argFreeMem args memory) = result 
     (inInfo, outInfo) = calcInOut graph blocks
 
     blocksToAsm ((i, q):t) mem freeLoc = case Map.lookup i outInfo of
-        Just alive -> case runQuadsToAsm q alive mem freeLoc of
+        Just alive -> case runQuadsToAsm (collectGarbageBlock q alive) alive mem freeLoc of
             (newMem, newFree, asm1) -> case blocksToAsm t newMem newFree of
                 (asm2, fm2) -> trace (show newMem ++ "<---- NEW MEMORU") (asm1 ++ asm2, fm2)
         Nothing -> error "fatal"
@@ -718,5 +716,3 @@ r4 = functionToASM hehe4
 r5 = functionToASM hehe5
 r6 = functionToASM hehe6
 
-
---- TODO napraw argument w funkcjach

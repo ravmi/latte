@@ -6,13 +6,15 @@ import qualified Data.Set as Set
 
 import Data.List (intercalate)
 
-data QArgument = QaVar Var | QaConst Int | QaEmpty | QaList [QArgument] | QaConstStr String
+
+data QArgument = QaVar Var | QaConst Int | QaEmpty | QaList [QArgument] | QaConstStr StaticLocation
     deriving (Eq, Ord, Read, Show)
 
 printQa (QaVar v) = "v" ++ (show v)
 printQa (QaConst i) = "$" ++ (show i)
 printQa (QaEmpty) = ""
 printQa (QaList l) = show l
+printQa (QaConstStr x) = "string:" ++ (show x)
 
 data QuadFunction = QuadFunction Ident [Quad] Int Int (Map.Map Int (Int, Type))
     deriving (Eq, Ord, Show, Read)
@@ -48,6 +50,7 @@ data Op
     | OpRet
     | OpJmp String
     | OpGoToIfFalse String
+    | OpGoToIfTrue String
     | OpAllocString Int Int
     | OpLabel String
     | OpCall String
@@ -56,19 +59,13 @@ data Op
     | OpLoadFromHeap --usefful (%rax)
 
     -- x OpWhereOnHeap t i: calculates where t[i] is in the memory
-    | OpWhereOnHeap
-
-
-
+    -- | OpWhereOnHeap
 
     -- OpSaveToHeap where what: saves what to *where (remember that all are ints/indexes)
     | OpSaveToHeap
 
-
-
-
     -- x (OpAssFromHeap size) where _: loads *where or t.i from memory and saves it to memory where x is
-    | OpAssFromHeap -- probably unnecessary and can use assignment for nomal variables
+    -- | OpAssFromHeap -- probably unnecessary and can use assignment for nomal variables
     --
     -- alloc
     deriving (Eq, Ord, Read, Show)

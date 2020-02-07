@@ -2,10 +2,16 @@ module ASM where
 
 import Data.List (intercalate)
 
+data StaticLocation = SL String
+    deriving (Eq, Ord, Read)
+
+instance Show StaticLocation where
+    show (SL str) = "$" ++ str
+
 data Reg = Rax | Rbx | Rcx | Rdx | Rsi | Rdi | R8 | R9 | R10 | R11 | Rsp | Rbp
     deriving (Eq, Ord, Read)
 
-data AmdArg = AAReg Reg | AAMem Int | AAConst Int | AAConstStr String
+data AmdArg = AAReg Reg | AAMem Int | AAConst Int | AAConstStr StaticLocation
     deriving (Eq, Ord, Read)
 
 data ASM = APush AmdArg
@@ -25,6 +31,7 @@ data ASM = APush AmdArg
          | ALab String
          | AJmp String
          | AJmpNe String
+         | AJmpE String
          | ALeave
          | ASetLt
          | ASetLe
@@ -33,6 +40,8 @@ data ASM = APush AmdArg
          | ASetEq
          | ASetNe
          | ACall String
+         | ALoad AmdArg AmdArg
+         | ASave AmdArg AmdArg
           deriving (Eq, Ord, Read)
 
 workingRegisters = [Rbx, Rcx, Rsi, Rdi, R8, R9, R10, R11]
@@ -55,7 +64,7 @@ instance Show AmdArg where
     show (AAReg r) = show r
     show (AAMem i) = let
         pos1 = show $ -(8 * (i + 1))
-        pos2 = show $ (1-i) * 8 in
+        pos2 = show $ (1-i) * 8 in --- TODO change it
         case (i >= 0) of
             True -> pos1 ++ "(%rbp)"
             False -> pos2 ++ "(%rbp)"
@@ -85,6 +94,7 @@ instance Show ASM where
     show (ALab lname) = "." ++ lname ++ ":"
     show (AJmp lname) = "jmp ." ++ lname
     show (AJmpNe lname) = "jne ." ++ lname
+    show (AJmpE lname) = "je ." ++ lname
     show (ALeave) = "leave"
     show (ASetLt) = "setl %al"
     show (ASetLe) = "setle %al"
@@ -93,3 +103,5 @@ instance Show ASM where
     show (ASetEq) = "sete %al"
     show (ASetNe) = "setne %al"
     show (ACall fname) = "call " ++ fname
+    show (ALoad arg1 arg2) = "movq " ++ "(" ++ (show arg1) ++ ")" ++  ", " ++ (show arg2)
+    show (ASave arg1 arg2) = "movq " ++ (show arg1) ++ ", " ++ "(" ++ (show arg2) ++ ")"

@@ -64,3 +64,15 @@ repeatingArgs arguments = errLog where
     showArg (Arg varType (Ident varName)) = show varType ++ " " ++ varName
     argList = map showArg arguments
     errLog = errToken ++ why ++ ": " ++ "[" ++ (intercalate ", " argList) ++ "]"
+
+repeatingMembers :: [CDeclare] -> String
+repeatingMembers members = errLog where
+    why = "Some of the class members repeat"
+    showArg (CDVar varType (Ident varName)) = show varType ++ " " ++ varName
+    argList = map showArg members
+    errLog = errToken ++ why ++ ": " ++ "[" ++ (intercalate ", " argList) ++ "]"
+
+typeDoesntExist :: Ident -> String
+typeDoesntExist (Ident className) = errLog where
+    errLog = "Undeclared class used in definition of " ++ className
+

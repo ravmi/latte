@@ -17,11 +17,11 @@ separator  Arg "," ;
 
 -- left side in equation
 
-Var.       LeftEq ::= Ident ;
+LVar.      LeftEq ::= Ident ;
  
-SDeref.    LeftEq ::= Ident "." Ident ;
+LSDeref.   LeftEq ::= Ident "." Ident ;
 
-ADeref.    LeftEq ::= Ident "[" Expr "]" ;
+LADeref.   LeftEq ::= Ident "[" Expr "]" ;
 
 
 -- statements ----------------------------------------------
@@ -58,6 +58,8 @@ CondElse.  Stmt ::= "if" "(" Expr ")" Stmt "else" Stmt  ;
 
 While.     Stmt ::= "while" "(" Expr ")" Stmt ;
 
+For.       Stmt ::= "for" "(" Type Ident ":" Ident ")" Stmt ;
+
 SExp.      Stmt ::= Expr  ";" ;
 
 -- Types ---------------------------------------------------
@@ -70,7 +72,9 @@ Bool.      Type ::= "boolean" ;
 
 Void.      Type ::= "void" ;
 
-CType.      Type ::= Ident ;
+CType.     Type ::= Ident ;
+
+AType.     Type ::= Type "[]" ;
 
 internal   Fun. Type ::= Type "(" [Type] ")" ;
 
@@ -78,7 +82,13 @@ separator  Type "," ;
 
 -- Expressions ---------------------------------------------
 
-ENew.      Expr7 ::= "new" Type ;
+ENull.     Expr7 ::= "(" Type ")null" ;
+
+EALength.  Expr7 ::= Ident ".length" ;
+
+ENewOb.    Expr7 ::= "new" Type ;
+
+ENewAr.    Expr7 ::= "new" Type "[" Expr "]" ;
 
 EDerefA.   Expr7 ::= Ident "[" Expr "]" ;
 
@@ -142,11 +152,11 @@ NE.        RelOp ::= "!=" ;
 
 ClDef.     TopDef ::= "class" Ident "{" [CDeclare] "}" ;
 
-CDVar.     CDeclare ::= Type Ident ;
+CDVar.     CDeclare ::= Type Ident ";" ;
 
-CDFun.     CDeclare ::= FnDef ;
+-- CDFun.     CDeclare ::= FnDef ;
 
-separator CDeclare "" ;
+terminator CDeclare "" ;
 
 
 -- comments ------------------------------------------------

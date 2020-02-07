@@ -22,13 +22,17 @@ long int readInt() {
     return val;
 }
 
-char* _concat(char* a, char* b) {
+char* _latte_default_concat(char* a, char* b) {
     long int la = strlen(a);
     long int lb = strlen(b);
     char *c = malloc(la + lb + 1);
-    strcpy(c, b);
-    strcpy(c + lb, a);
+    strcpy(c, a);
+    strcpy(c + la, b);
     return c;
+}
+
+long int* _latte_default_alloc(long int a) {
+    return malloc(a);
 }
 
 void error() {

@@ -105,9 +105,9 @@ instance Print Arg where
   prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])
 instance Print LeftEq where
   prt i e = case e of
-    Var id -> prPrec i 0 (concatD [prt 0 id])
-    SDeref id1 id2 -> prPrec i 0 (concatD [prt 0 id1, doc (showString "."), prt 0 id2])
-    ADeref id expr -> prPrec i 0 (concatD [prt 0 id, doc (showString "["), prt 0 expr, doc (showString "]")])
+    LVar id -> prPrec i 0 (concatD [prt 0 id])
+    LSDeref id1 id2 -> prPrec i 0 (concatD [prt 0 id1, doc (showString "."), prt 0 id2])
+    LADeref id expr -> prPrec i 0 (concatD [prt 0 id, doc (showString "["), prt 0 expr, doc (showString "]")])
 
 instance Print Block where
   prt i e = case e of
@@ -126,6 +126,7 @@ instance Print Stmt where
     Cond expr stmt -> prPrec i 0 (concatD [doc (showString "if"), doc (showString "("), prt 0 expr, doc (showString ")"), prt 0 stmt])
     CondElse expr stmt1 stmt2 -> prPrec i 0 (concatD [doc (showString "if"), doc (showString "("), prt 0 expr, doc (showString ")"), prt 0 stmt1, doc (showString "else"), prt 0 stmt2])
     While expr stmt -> prPrec i 0 (concatD [doc (showString "while"), doc (showString "("), prt 0 expr, doc (showString ")"), prt 0 stmt])
+    For type_ id1 id2 stmt -> prPrec i 0 (concatD [doc (showString "for"), doc (showString "("), prt 0 type_, prt 0 id1, doc (showString ":"), prt 0 id2, doc (showString ")"), prt 0 stmt])
     SExp expr -> prPrec i 0 (concatD [prt 0 expr, doc (showString ";")])
   prtList _ [] = (concatD [])
   prtList _ (x:xs) = (concatD [prt 0 x, prt 0 xs])
@@ -142,13 +143,17 @@ instance Print Type where
     Bool -> prPrec i 0 (concatD [doc (showString "boolean")])
     Void -> prPrec i 0 (concatD [doc (showString "void")])
     CType id -> prPrec i 0 (concatD [prt 0 id])
+    AType type_ -> prPrec i 0 (concatD [prt 0 type_, doc (showString "[]")])
     Fun type_ types -> prPrec i 0 (concatD [prt 0 type_, doc (showString "("), prt 0 types, doc (showString ")")])
   prtList _ [] = (concatD [])
   prtList _ [x] = (concatD [prt 0 x])
   prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])
 instance Print Expr where
   prt i e = case e of
-    ENew type_ -> prPrec i 7 (concatD [doc (showString "new"), prt 0 type_])
+    ENull type_ -> prPrec i 7 (concatD [doc (showString "("), prt 0 type_, doc (showString ")null")])
+    EALength id -> prPrec i 7 (concatD [prt 0 id, doc (showString ".length")])
+    ENewOb type_ -> prPrec i 7 (concatD [doc (showString "new"), prt 0 type_])
+    ENewAr type_ expr -> prPrec i 7 (concatD [doc (showString "new"), prt 0 type_, doc (showString "["), prt 0 expr, doc (showString "]")])
     EDerefA id expr -> prPrec i 7 (concatD [prt 0 id, doc (showString "["), prt 0 expr, doc (showString "]")])
     EDerefS id1 id2 -> prPrec i 7 (concatD [prt 0 id1, doc (showString "."), prt 0 id2])
     EVar id -> prPrec i 6 (concatD [prt 0 id])
@@ -189,8 +194,7 @@ instance Print RelOp where
 
 instance Print CDeclare where
   prt i e = case e of
-    CDVar type_ id -> prPrec i 0 (concatD [prt 0 type_, prt 0 id])
-    CDFun fndef -> prPrec i 0 (concatD [prt 0 fndef])
+    CDVar type_ id -> prPrec i 0 (concatD [prt 0 type_, prt 0 id, doc (showString ";")])
   prtList _ [] = (concatD [])
   prtList _ (x:xs) = (concatD [prt 0 x, prt 0 xs])
 

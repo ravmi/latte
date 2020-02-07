@@ -58,7 +58,7 @@ CondElse.  Stmt ::= "if" "(" Expr ")" Stmt "else" Stmt  ;
 
 While.     Stmt ::= "while" "(" Expr ")" Stmt ;
 
-For.       Stmt ::= "for" "(" Type ":" Ident ")" Stmt ;
+For.       Stmt ::= "for" "(" Type Ident ":" Ident ")" Stmt ;
 
 SExp.      Stmt ::= Expr  ";" ;
 
@@ -84,9 +84,11 @@ separator  Type "," ;
 
 ENull.     Expr7 ::= "(" Type ")null" ;
 
-EALength.  Expr7 ::= Ident "." "length" ;
+EALength.  Expr7 ::= Ident ".length" ;
 
-ENew.      Expr7 ::= "new" Type ;
+ENewOb.    Expr7 ::= "new" Type ;
+
+ENewAr.    Expr7 ::= "new" Type "[" Expr "]" ;
 
 EDerefA.   Expr7 ::= Ident "[" Expr "]" ;
 
@@ -152,7 +154,7 @@ ClDef.     TopDef ::= "class" Ident "{" [CDeclare] "}" ;
 
 CDVar.     CDeclare ::= Type Ident ";" ;
 
-CDFun.     CDeclare ::= FnDef ;
+-- CDFun.     CDeclare ::= FnDef ;
 
 terminator CDeclare "" ;
 

@@ -31,6 +31,8 @@ import PrintLatte
 import AbsLatte
 import ErrM
 
+import ASM
+
 import CFG (buildCFG, calcInOut, splitIntoBlocks)
 
 import QuadData
@@ -50,6 +52,10 @@ type StaticValue = String
 -- in current state we want to keep locations of variables, state of the memory,
 -- current free avaliable memory location, location of beginning of the block
 -- and expected return type
+
+data ClassMemberDsc = ClassMemberDsc { name :: Ident,  t :: Type }
+    deriving (Eq, Ord, Show, Read)
+
 data ProgState = ProgState { _memory :: Memory
                  , _blockStart :: Loc
                  , _freeLocation :: Loc
@@ -62,6 +68,7 @@ data ProgState = ProgState { _memory :: Memory
                  , _staticFirstFree :: Int
                  , _nextVarName :: Int
                  , _varNames :: Map.Map Ident Int
+                 , _classInfo :: Map.Map Ident [ClassMemberDsc]
                  }
                  deriving (Eq, Ord, Show, Read)
 mkLabels [''ProgState]
@@ -103,6 +110,11 @@ update fun val = do
     state <- get
     put $ set fun val state
 
+--runUpdate :: ProgState :-> a -> (a -> b) -> Eval ()
+runUpdate getter action = do
+    val <- lgets getter
+    update getter (action val)
+
 lgets :: MonadState f m => f :-> a -> m a
 lgets f = gets (L.get f)
 
@@ -114,7 +126,7 @@ newLabel = do
 
 makeLabelN :: Integer -> Eval String
 makeLabelN i = do
-    return $ ".L" ++ (show i)
+    return $ "L" ++ (show i)
 
 makeLabelQ :: Integer -> Eval Quad
 makeLabelQ i = return $ QuadNoAssign (OpLabel ("L" ++ (show i))) QaEmpty QaEmpty
@@ -165,6 +177,13 @@ giveVarName iName = do
     vns <- lgets varNames
     update varNames (Map.insert iName numName vns)
     return numName
+
+lookupVarName :: Ident -> Eval (Int)
+lookupVarName varName = do
+    vns <- lgets varNames
+    case Map.lookup varName vns of
+        Just iName -> return iName
+        Nothing -> throwError $ show (varName) ++ " was not given a name"
 
 allocateVar :: Ident -> Type -> Eval Int
 allocateVar varName varType = do
@@ -234,10 +253,10 @@ translateExpression (EApp funName funArgs) = do
     return (QaVar newVar, expectedRet)
 
 ---TODO allocate stateic
+--- TODO fix string
 translateExpression (EString str) = do
-    newVar <- newVarName
     sMem <- allocStatic str
-    return $ (QaConstStr ("." ++ (show sMem)), Str)
+    return $ (QaConstStr (SL (".static_" ++ (show sMem))), Str)
     -- emit $ Quad4 newVar (OpAllocString sMem (length str + 1)) QaEmpty QaEmpty
     --return $ (QaVar newVar, Str)
 
@@ -245,7 +264,7 @@ translateExpression (EString str) = do
 translateExpression (Neg expr) = do
     newVar <- newVarName
     (expVar, t) <- translateExpression expr
-    when (t /= Bool)
+    when (t /= Int)
         (throwError $ badTypesSuggestion "`-`" Int t)
     emit $ Quad4 newVar OpNeg expVar QaEmpty
     return (QaVar newVar, Int)
@@ -280,7 +299,7 @@ translateExpression (EAdd exp1 Plus exp2) = do
         (throwError $ badTypes "`+`" [t1, t2])
     case t1 of
         Int -> do emit $ Quad4 newVar OpAdd r2 r1
-        Str -> do emit $ Quad4 newVar (OpCall "concatStrings_") (QaList [r1, r2]) QaEmpty
+        Str -> do emit $ Quad4 newVar (OpCall "_latte_default_concat") (QaList [r1, r2]) QaEmpty
     return (QaVar newVar, t1)
 
 translateExpression (EAdd exp1 Minus exp2) = do
@@ -296,9 +315,18 @@ translateExpression (ERel exp1 EQU exp2) = do
     newVar <- newVarName
     (r1, t1) <- translateExpression exp1
     (r2, t2) <- translateExpression exp2
-    when ((t1 /= t2) || (t1 /= Int && t1 /= Str && t1 /= Bool))
+    when (t1 /= t2)
         (throwError $ badTypes "`==`" [t1, t2])
     emit $ Quad4 newVar OpCmpIntEq r1 r2
+    return (QaVar newVar, Bool)
+
+translateExpression (ERel exp1 NE exp2) = do
+    newVar <- newVarName
+    (r1, t1) <- translateExpression exp1
+    (r2, t2) <- translateExpression exp2
+    when (t1 /= t2)
+        (throwError $ badTypes "`==`" [t1, t2])
+    emit $ Quad4 newVar OpCmpIntNe r1 r2
     return (QaVar newVar, Bool)
 
 translateExpression (ERel exp1 op exp2) = do
@@ -319,28 +347,99 @@ translateExpression (ERel exp1 op exp2) = do
 translateExpression (EAnd exp1 exp2) = do
     newVar <- newVarName
     (r1, t1) <- translateExpression exp1
+    emit $ Quad4 newVar OpAssVar r1 QaEmpty
+    when (t1 /= Bool)
+        (throwError $ badTypesSuggestion "&&" [Bool] [t1])
+
+    lname1 <- newLabel
+    lName <- makeLabelN lname1
+    emit $ QuadNoAssign (OpGoToIfFalse lName) r1 QaEmpty
+
     (r2, t2) <- translateExpression exp2
-    when (t1 /= Bool || t2 /= Bool)
-        (throwError $ badTypesSuggestion "&&" [Bool, Bool] [t1, t2])
+    when (t2 /= Bool)
+        (throwError $ badTypesSuggestion "&&" [Bool] [t2])
     emit $ Quad4 newVar OpAnd r1 r2
+    emit $ QuadNoAssign (OpLabel lName) QaEmpty QaEmpty
     return (QaVar newVar, Bool)
 
 translateExpression (EOr exp1 exp2) = do
     newVar <- newVarName
     (r1, t1) <- translateExpression exp1
+    emit $ Quad4 newVar OpAssVar r1 QaEmpty
+    when (t1 /= Bool)
+        (throwError $ badTypesSuggestion "&&" [Bool] [t1])
+
+    lname1 <- newLabel
+    lName <- makeLabelN lname1
+    emit $ QuadNoAssign (OpGoToIfTrue lName) r1 QaEmpty
+
     (r2, t2) <- translateExpression exp2
-    when (t1 /= Bool || t2 /= Bool)
-        (throwError $ badTypesSuggestion "||" [Bool, Bool] [t1, t2])
+    when (t2 /= Bool)
+        (throwError $ badTypesSuggestion "&&" [Bool] [t2])
     emit $ Quad4 newVar OpOr r1 r2
+    emit $ QuadNoAssign (OpLabel lName) QaEmpty QaEmpty
     return (QaVar newVar, Bool)
 
+--translateExpression (EOr exp1 exp2) = do
+--    newVar <- newVarName
+--    (r1, t1) <- translateExpression exp1
+--    (r2, t2) <- translateExpression exp2
+--    when (t1 /= Bool || t2 /= Bool)
+--        (throwError $ badTypesSuggestion "||" [Bool, Bool] [t1, t2])
+--    emit $ Quad4 newVar OpOr r1 r2
+--    return (QaVar newVar, Bool)
+
+translateExpression (ENull typ) = return (QaConst 0, typ)
+translateExpression (EALength arName) = do
+    (iName, typ) <- lookupVar arName
+    newVar <- newVarName
+    case typ of
+        AType elType -> do
+            emit $ Quad4 newVar OpLoadFromHeap (QaVar iName) QaEmpty
+            return (QaVar newVar, Int)
+        _ -> translateExpression (EDerefS arName (Ident "length"))
+
+translateExpression (ENewOb typ) = do
+    newVar <- newVarName
+    case typ of
+        CType className -> do
+            classes <- lgets classInfo
+            case Map.lookup className classes of
+                Just members -> do
+                    emit $ Quad4 newVar (OpCall "_latte_default_alloc") (QaList [QaConst $ length members * 8]) QaEmpty
+                    return (QaVar newVar, typ)
+                Nothing -> throwError $ "type in new doesn't exist"
+        _ -> throwError $ "incorrect type in new"
+
+translateExpression (ENewAr typ expr) = do
+    (r1, t1) <- translateExpression expr
+    when (t1 /= Int)
+        (throwError "index in new is not Int")
+
+    newVar1 <- newVarName
+    newVar2 <- newVarName
+
+    emit $ Quad4 newVar1 OpMul r1 (QaConst 8)
+    emit $ Quad4 newVar1 OpAdd (QaVar newVar1) (QaConst 8)
+
+    emit $ Quad4 newVar2 (OpCall "_latte_default_alloc") (QaList [QaVar newVar1]) QaEmpty
+    emit $ QuadNoAssign OpSaveToHeap (QaVar newVar2) r1
 
 
+    return (QaVar newVar2, AType typ)
 
 
+translateExpression (EDerefA arName expInd) = do
+    (whereToRead, memberType) <- arrayDeref arName expInd
+    newVar <- newVarName
+    emit $ Quad4 newVar OpLoadFromHeap (QaVar whereToRead) QaEmpty
+    return (QaVar newVar, memberType)
 
-
-
+translateExpression (EDerefS structName structMember) = do
+    (whereToRead, memberType) <- classDeref structName structMember
+    newVar <- newVarName
+    emit $ Quad4 newVar OpLoadFromHeap (QaVar whereToRead) QaEmpty
+    return (QaVar newVar, memberType)
 
 runBlock :: Block -> Eval ()
 runBlock (Block statements) = do
@@ -353,6 +452,13 @@ declare varName varType = do
     mem <- lgets memory
     startLoc <- lgets blockStart
     vNames <- lgets varNames
+
+    classes <- lgets classInfo
+    case varType of
+        CType className -> case Map.lookup className classes of
+            Just _ -> return ()
+            Nothing -> throwError $ typeDoesntExist varName
+        _ -> return ()
     case Map.lookup varName vNames of
         Just iName -> case Map.lookup iName mem of
             Just (location, _) -> if (location >= startLoc)
@@ -377,10 +483,45 @@ declareItem expectedType (Init varName expr) = do
     --putRegister r1
 
 
+arrayDeref arStrName indexExpression = do
+    (ind, indType) <- translateExpression indexExpression
+    when (Int /= indType)
+        (throwError $ badTypesSuggestion "array dereference" [indType] [Int])
 
+    newVar1 <- newVarName
+    newVar2 <- newVarName
+    (_, varType) <- lookupVar arStrName
+    arIntName <- lookupVarName arStrName
+    case varType of
+        AType elType -> do
+            emit $ Quad4 newVar1 OpAdd (QaVar arIntName) (QaConst 8)
+            emit $ Quad4 newVar2 OpMul ind (QaConst 8)
+            emit $ Quad4 newVar2 OpAdd (QaVar newVar1) (QaVar newVar2)
+            return (newVar2, elType)
+        _ -> throwError $ (show arStrName) ++ "is not an array"
 
+--classDeref
+--runStmt (Ass (LSDeref varStrName classMember) expr) = do
+classDeref varStrName classMember = do
+    newVar1 <- newVarName
+    newVar2 <- newVarName
+    classes <- lgets classInfo
 
+    (memLoc, varType) <- lookupVar varStrName
+    varIntName <- lookupVarName varStrName
+    varMembers <- case varType of
+        CType typeName -> case Map.lookup typeName classes of
+            Just members -> return $ members
+            Nothing -> throwError $ typeDoesntExist typeName
+        _ -> throwError $ show varStrName ++ "is not a class object"
 
+    case findIndex ((==classMember) . name) varMembers of
+        Just i -> let
+            memberType = t $ varMembers!!i in do
+                emit $ Quad4 newVar1 OpMul (QaConst i) (QaConst 8)
+                emit $ Quad4 newVar2 OpAdd (QaVar varIntName) (QaVar newVar1)
+                return (newVar2, memberType)
+        Nothing -> throwError $ (show classMember) ++ " is not a member of " ++ (show varStrName)
 
 
 
@@ -388,7 +529,6 @@ runStmt :: Stmt -> Eval ()
 runStmt Empty = return ()
 
 
----TODO
 runStmt (BStmt block) = do
     bs <- lgets blockStart
     names <- lgets varNames
@@ -398,15 +538,34 @@ runStmt (BStmt block) = do
     --ret <- preserveState $ catchRet (runBlock block)
     --update caughtRetType ret
 
----TODO
 runStmt (Decl varType varInits) = mapM_ (declareItem varType) varInits
 
-runStmt (Ass varName expr) = do
+runStmt (Ass (LVar varName) expr) = do
     (r1, t1) <- translateExpression expr
     (r2, t2) <- lookupVar varName
     when (t1 /= t2)
         (throwError $ badTypesSuggestion "assignment" t2 t1)
     emit $ Quad4 r2 OpAssVar r1 QaEmpty
+
+runStmt (Ass (LSDeref varStrName classMember) expr) = do
+    (whereToWrite, memberType) <- classDeref varStrName classMember
+    (r1, t1) <- translateExpression expr
+    case memberType == t1 of
+        True -> do
+            emit $ QuadNoAssign OpSaveToHeap (QaVar whereToWrite) (r1)
+        False -> throwError $ badTypesSuggestion "dereference" [t1] [memberType]
+
+
+runStmt (Ass (LADeref arStrName indexExpression) expr) = do
+    (whereToWrite, arrElType) <- arrayDeref arStrName indexExpression
+    (expr, exprType) <- translateExpression expr
+
+    case arrElType == exprType of
+        True -> do
+            emit $ QuadNoAssign OpSaveToHeap (QaVar whereToWrite) expr
+        False -> throwError $ badTypesSuggestion "array assignment" [exprType] [arrElType]
+
+
 
 runStmt (Incr varName) = do
     (r1, t1) <- lookupVar varName
@@ -499,6 +658,27 @@ runStmt (While expr stmt) = do
     emit $ QuadNoAssign (OpJmp lName1) QaEmpty QaEmpty
     emit $ QuadNoAssign (OpLabel lName2) QaEmpty QaEmpty
 
+runStmt (For elType elStrName arStrName stmt) = result where
+    decls = Decl Int [Init (Ident "__i") (ELitInt 0), Init (Ident "__length") (EALength arStrName)]
+    incr = Incr (Ident "__i")
+    cmpExp = ERel (EVar (Ident "__i")) LTH (EVar (Ident "__length"))
+    prepareQ = Decl Int [Init elStrName (EDerefA arStrName (EVar (Ident "__i")))]
+    whileLoop = While cmpExp (BStmt $ Block [prepareQ, stmt, incr])
+    block =  BStmt (Block [decls, whileLoop])
+    result = runStmt block
+
+--    (elIName, elType) <- lookupVar elStrName
+--    (arIName, arType) <- lookupVar arStrName
+--    arLengthVar <- newVarName
+--    case arType of
+--        AType et -> do
+--            when (et /= elType)
+--                (throwError $ badTypesSuggestion [et] [at])
+--            emit $ Quad4 arLengthVar OpLoadFromHeap (QaVar arIName) QaEmpty
+--        _ -> throwError $ (show arStrName) ++ " is not an array"
+
+
+
 runStmt (SExp expr) = do
     translateExpression expr
     return ()
@@ -535,13 +715,66 @@ getArgTypes arguments = do
         argTypes = map getType arguments in
         return argTypes
 
-declareFun :: TopDef -> Eval ()
+declareFun :: FnDef -> Eval ()
 declareFun (FnDef retType funName arguments _) = do
     funs <- lgets functions
+    classes <- lgets classInfo
     argTypes <- getArgTypes arguments
+
+    case elem funName (Map.keys classes) of
+        True -> throwError $ alreadyDeclared funName
+        _ -> return ()
+
     case Map.lookup funName funs of
         Just t -> throwError $ alreadyDeclared funName
         _ -> update functions (Map.insert funName (Fun retType argTypes) funs)
+
+
+declareClass :: TopDef -> Eval ()
+declareClass (ClDef className _) = do
+    classes <- lgets classInfo
+    case Map.lookup className classes of
+        Just _ -> throwError $ alreadyDeclared className
+        _ -> runUpdate classInfo (Map.insert className [])
+
+
+defineClass :: TopDef -> Eval ()
+defineClass (ClDef className dcls) = let
+    filterMembers ((CDVar typ name):t) = ((typ, name):(filterMembers t))
+    -- filterMembers (_:t) = filterMembers t
+    filterMembers [] = []
+
+    members = filterMembers dcls
+    types = map fst members
+    names = map snd members in do
+
+    case (length . nub) names /= (length names) of
+        True -> throwError  $ repeatingMembers dcls
+        False -> return ()
+
+    classes <- lgets classInfo
+    let
+        typeExists Int = True
+        typeExists Str = True
+        typeExists Bool = True
+        typeExists (CType name) = elem name (Map.keys classes) in
+
+        case and $ map typeExists types of
+            True -> return ()
+            False -> throwError $ typeDoesntExist className
+    let
+        prepareMember (CDVar typ name) = ClassMemberDsc name typ
+        membersPrepared = map prepareMember dcls in
+        runUpdate classInfo (Map.insert className membersPrepared)
+
+
+
+
+--check if class with this name wasn't already declared fail
+
+
+
+
 
 
 -- the types are wrong here
@@ -566,7 +799,7 @@ flushCode = do
     update code []
     return c
 
-defineFun :: TopDef -> Eval (QuadFunction)
+defineFun :: FnDef -> Eval (QuadFunction)
 defineFun (FnDef retType funName arguments block) = do
     argNames <- getArgNames arguments
     argTypes <- getArgTypes arguments
@@ -594,17 +827,29 @@ declareNativeFunctions = do
     insertFunction "printString" (Fun Void [Str])
     insertFunction "readInt" (Fun Int [])
     insertFunction "readString" (Fun Str [])
-
-    insertFunction "concatStrings_" (Fun Str [Str, Str])
+    insertFunction "_latte_default_concat" (Fun Str [Str, Str])
     return ()
 
 
 -- gives list of translated functions and state of static memory
 programToQuadsInMonad :: Program -> Eval ([QuadFunction], Map.Map Int String)
-programToQuadsInMonad (Program defList) = do
+programToQuadsInMonad (Program defList) = let
+    gatherFunDcls ((FnTopDef x):t) = [x] ++ (gatherFunDcls t)
+    gatherFunDcls (h:t) = gatherFunDcls t
+    gatherFunDcls [] = []
+
+    isClassDcl (ClDef _ _) = True
+    isClassDcl _ = False
+
+    classList = filter isClassDcl defList
+    funList = gatherFunDcls defList in do
     declareNativeFunctions
-    mapM_ declareFun defList
-    qBlocks <- mapM defineFun defList
+
+    mapM_ declareClass classList
+    mapM_ defineClass classList
+
+    mapM_ declareFun funList
+    qBlocks <- mapM defineFun funList
     staticM <- lgets staticMemory
     return (qBlocks, staticM)
 
@@ -620,8 +865,11 @@ runText s = let ts = myLexer s in case pProgram ts of
                 hPutStrLn stderr "\nParse              Failed...\n"
                 hPutStrLn stderr s
                 exitFailure
-    Ok tree -> case runEval (ProgState Map.empty 0 0 Void (Void, False) [] 1 Map.empty Map.empty 0 0 Map.empty) (programToQuadsInMonad tree) of
-        Right ((qfunctions, static), w) -> let
+    Ok tree -> case runEval (ProgState Map.empty 0 0 Void (Void, False) [] 1 Map.empty Map.empty 0 0 Map.empty Map.empty) (programToQuadsInMonad tree) of
+        Right ((qfunctions, staticData), w) -> let
+            staticVar k v = ".static_" ++ (show k) ++ ":\n" ++ "    .string " ++ (show  (filter (/='\n') v)) ++ "\n"
+            statics = ".section .rodata\n" ++ concatMap (uncurry staticVar) (Map.toList staticData)
+            text = ".text\n"
             globl n = ".globl " ++ n ++ "\n"
             functionName n = n ++ ":\n"
             showIndent asm = (intercalate "\n" (map (("    " ++) . show) (functionToASM asm)) ++ "\n")
@@ -629,7 +877,7 @@ runText s = let ts = myLexer s in case pProgram ts of
             bCFG ((QuadFunction _ quads _ _ _)) = buildCFG (splitIntoBlocks quads)
             bInOut q@(QuadFunction _ quads _ _ _) = calcInOut (bCFG q) (splitIntoBlocks quads)
             getblocks q@(QuadFunction _ quads _ _ _) = splitIntoBlocks quads
-            codeText = concatMap functionToString qfunctions in do
+            codeText = statics ++ text ++ concatMap functionToString qfunctions in do
                 print qfunctions
                 putStrLn $ concatMap printQuadFunction qfunctions
                 --print "blocks"

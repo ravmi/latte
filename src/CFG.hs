@@ -20,6 +20,7 @@ isJmp :: Quad -> Bool
 isJmp q = case q of
     QuadNoAssign (OpJmp _) _ _ -> True
     QuadNoAssign (OpGoToIfFalse _) _ _ -> True
+    QuadNoAssign (OpGoToIfTrue _) _ _ -> True
     _ -> False
 
 
@@ -42,6 +43,7 @@ lookupMany l m = result where
 canGoTo :: (Int, [Quad]) -> (Int, [Quad]) -> Bool
 canGoTo (i1, b1) (i2, b2) = case (last b1, b2) of
     (QuadNoAssign (OpGoToIfFalse lab1) _ _, (QuadNoAssign (OpLabel lab2) _ _:_)) -> lab1 == lab2
+    (QuadNoAssign (OpGoToIfTrue lab1) _ _, (QuadNoAssign (OpLabel lab2) _ _:_)) -> lab1 == lab2
     (QuadNoAssign (OpJmp lab1) _ _, ((QuadNoAssign (OpLabel lab2) _ _):_)) -> lab1 == lab2
     _ -> (i1+1) == i2
 

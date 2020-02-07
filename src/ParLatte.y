@@ -19,38 +19,43 @@ import ErrM
   '&&' { PT _ (TS _ 4) }
   '(' { PT _ (TS _ 5) }
   ')' { PT _ (TS _ 6) }
-  '*' { PT _ (TS _ 7) }
-  '+' { PT _ (TS _ 8) }
-  '++' { PT _ (TS _ 9) }
-  ',' { PT _ (TS _ 10) }
-  '-' { PT _ (TS _ 11) }
-  '--' { PT _ (TS _ 12) }
-  '.' { PT _ (TS _ 13) }
-  '/' { PT _ (TS _ 14) }
-  ';' { PT _ (TS _ 15) }
-  '<' { PT _ (TS _ 16) }
-  '<=' { PT _ (TS _ 17) }
-  '=' { PT _ (TS _ 18) }
-  '==' { PT _ (TS _ 19) }
-  '>' { PT _ (TS _ 20) }
-  '>=' { PT _ (TS _ 21) }
-  '[' { PT _ (TS _ 22) }
-  ']' { PT _ (TS _ 23) }
-  'boolean' { PT _ (TS _ 24) }
-  'class' { PT _ (TS _ 25) }
-  'else' { PT _ (TS _ 26) }
-  'false' { PT _ (TS _ 27) }
-  'if' { PT _ (TS _ 28) }
-  'int' { PT _ (TS _ 29) }
-  'new' { PT _ (TS _ 30) }
-  'return' { PT _ (TS _ 31) }
-  'string' { PT _ (TS _ 32) }
-  'true' { PT _ (TS _ 33) }
-  'void' { PT _ (TS _ 34) }
-  'while' { PT _ (TS _ 35) }
-  '{' { PT _ (TS _ 36) }
-  '||' { PT _ (TS _ 37) }
-  '}' { PT _ (TS _ 38) }
+  ')null' { PT _ (TS _ 7) }
+  '*' { PT _ (TS _ 8) }
+  '+' { PT _ (TS _ 9) }
+  '++' { PT _ (TS _ 10) }
+  ',' { PT _ (TS _ 11) }
+  '-' { PT _ (TS _ 12) }
+  '--' { PT _ (TS _ 13) }
+  '.' { PT _ (TS _ 14) }
+  '.length' { PT _ (TS _ 15) }
+  '/' { PT _ (TS _ 16) }
+  ':' { PT _ (TS _ 17) }
+  ';' { PT _ (TS _ 18) }
+  '<' { PT _ (TS _ 19) }
+  '<=' { PT _ (TS _ 20) }
+  '=' { PT _ (TS _ 21) }
+  '==' { PT _ (TS _ 22) }
+  '>' { PT _ (TS _ 23) }
+  '>=' { PT _ (TS _ 24) }
+  '[' { PT _ (TS _ 25) }
+  '[]' { PT _ (TS _ 26) }
+  ']' { PT _ (TS _ 27) }
+  'boolean' { PT _ (TS _ 28) }
+  'class' { PT _ (TS _ 29) }
+  'else' { PT _ (TS _ 30) }
+  'false' { PT _ (TS _ 31) }
+  'for' { PT _ (TS _ 32) }
+  'if' { PT _ (TS _ 33) }
+  'int' { PT _ (TS _ 34) }
+  'new' { PT _ (TS _ 35) }
+  'return' { PT _ (TS _ 36) }
+  'string' { PT _ (TS _ 37) }
+  'true' { PT _ (TS _ 38) }
+  'void' { PT _ (TS _ 39) }
+  'while' { PT _ (TS _ 40) }
+  '{' { PT _ (TS _ 41) }
+  '||' { PT _ (TS _ 42) }
+  '}' { PT _ (TS _ 43) }
 
 L_ident  { PT _ (TV $$) }
 L_integ  { PT _ (TI $$) }
@@ -79,9 +84,9 @@ ListArg : {- empty -} { [] }
         | Arg { (:[]) $1 }
         | Arg ',' ListArg { (:) $1 $3 }
 LeftEq :: { LeftEq }
-LeftEq : Ident { AbsLatte.Var $1 }
-       | Ident '.' Ident { AbsLatte.SDeref $1 $3 }
-       | Ident '[' Expr ']' { AbsLatte.ADeref $1 $3 }
+LeftEq : Ident { AbsLatte.LVar $1 }
+       | Ident '.' Ident { AbsLatte.LSDeref $1 $3 }
+       | Ident '[' Expr ']' { AbsLatte.LADeref $1 $3 }
 Block :: { Block }
 Block : '{' ListStmt '}' { AbsLatte.Block (reverse $2) }
 ListStmt :: { [Stmt] }
@@ -98,6 +103,7 @@ Stmt : ';' { AbsLatte.Empty }
      | 'if' '(' Expr ')' Stmt { AbsLatte.Cond $3 $5 }
      | 'if' '(' Expr ')' Stmt 'else' Stmt { AbsLatte.CondElse $3 $5 $7 }
      | 'while' '(' Expr ')' Stmt { AbsLatte.While $3 $5 }
+     | 'for' '(' Type Ident ':' Ident ')' Stmt { AbsLatte.For $3 $4 $6 $8 }
      | Expr ';' { AbsLatte.SExp $1 }
 Item :: { Item }
 Item : Ident { AbsLatte.NoInit $1 }
@@ -110,12 +116,16 @@ Type : 'int' { AbsLatte.Int }
      | 'boolean' { AbsLatte.Bool }
      | 'void' { AbsLatte.Void }
      | Ident { AbsLatte.CType $1 }
+     | Type '[]' { AbsLatte.AType $1 }
 ListType :: { [Type] }
 ListType : {- empty -} { [] }
          | Type { (:[]) $1 }
          | Type ',' ListType { (:) $1 $3 }
 Expr7 :: { Expr }
-Expr7 : 'new' Type { AbsLatte.ENew $2 }
+Expr7 : '(' Type ')null' { AbsLatte.ENull $2 }
+      | Ident '.length' { AbsLatte.EALength $1 }
+      | 'new' Type { AbsLatte.ENewOb $2 }
+      | 'new' Type '[' Expr ']' { AbsLatte.ENewAr $2 $4 }
       | Ident '[' Expr ']' { AbsLatte.EDerefA $1 $3 }
       | Ident '.' Ident { AbsLatte.EDerefS $1 $3 }
       | '(' Expr ')' { $2 }
@@ -159,8 +169,7 @@ RelOp : '<' { AbsLatte.LTH }
       | '==' { AbsLatte.EQU }
       | '!=' { AbsLatte.NE }
 CDeclare :: { CDeclare }
-CDeclare : Type Ident { AbsLatte.CDVar $1 $2 }
-         | FnDef { AbsLatte.CDFun $1 }
+CDeclare : Type Ident ';' { AbsLatte.CDVar $1 $2 }
 ListCDeclare :: { [CDeclare] }
 ListCDeclare : {- empty -} { [] }
              | ListCDeclare CDeclare { flip (:) $1 $2 }
