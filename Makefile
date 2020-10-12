@@ -1,39 +1,64 @@
-all:	ParLatte.hs latc_x86_64
-	alex -g LexLatte.x
-latc_x86_64:	lat_to_asm
+MKDIR_P = mkdir -p
+BUILD_DIR = build
+LATTE_LIBS = ${BUILD_DIR}/ASM.hs ${BUILD_DIR}/QuadData.hs ${BUILD_DIR}/ImdLatte.hs \
+			 ${BUILD_DIR}/NextUses.hs ${BUILD_DIR}/GarbageCollector.hs \
+			 ${BUILD_DIR}/CFG.hs ${BUILD_DIR}/LatteErrors.hs
+
+.PHONY: directories clean all ${LATTE_LIBS}
+
+all: directories latc_x86_64
+
+directories: ${BUILD_DIR}
+
+${BUILD_DIR}: 
+	${MKDIR_P} ${BUILD_DIR}
+
+latc_x86_64: lat_to_asm_bin programs
 	cp src/latc_x86_64 latc_x86_64
 
-lat_to_asm: latte
-	ghc --make -isrc src/latte.hs -o lat_to_asm
+lat_to_asm_bin: ${BUILD_DIR}/latte.hs ${BUILD_DIR}/LexLatte.hs ${BUILD_DIR}/ParLatte.hs ${LATTE_LIBS}
+	cd ${BUILD_DIR}; ghc --make -ibuild latte.hs -o lat_to_asm_bin; mv lat_to_asm_bin ../
 
-latte: src/latte.hs
-	
+programs:
+	${MKDIR_P} programs
+
+${BUILD_DIR}/ASM.hs: src/ASM.hs
+	cp src/ASM.hs ${BUILD_DIR}
+
+${BUILD_DIR}/QuadData.hs: src/QuadData.hs
+	cp src/QuadData.hs ${BUILD_DIR}
+
+${BUILD_DIR}/ImdLatte.hs: src/ImdLatte.hs
+	cp src/ImdLatte.hs ${BUILD_DIR}
+
+${BUILD_DIR}/NextUses.hs: src/NextUses.hs
+	cp src/NextUses.hs ${BUILD_DIR}
+
+${BUILD_DIR}/GarbageCollector.hs: src/GarbageCollector.hs
+	cp src/GarbageCollector.hs ${BUILD_DIR}
+
+${BUILD_DIR}/CFG.hs: src/CFG.hs
+	cp src/CFG.hs ${BUILD_DIR}
+
+${BUILD_DIR}/LatteErrors.hs: src/LatteErrors.hs
+	cp src/LatteErrors.hs ${BUILD_DIR}
+
+${BUILD_DIR}/latte.hs: src/latte.hs
+	cp src/latte.hs ${BUILD_DIR}
+
+${BUILD_DIR}/LexLatte.hs: ${BUILD_DIR}/LexLatte.x
+	cd ${BUILD_DIR}; alex -g LexLatte.x
+
+${BUILD_DIR}/LexLatte.x: ${BUILD_DIR}/Latte.cf
+	cd ${BUILD_DIR}; bnfc Latte.cf
+
+${BUILD_DIR}/Latte.cf:
+	cp src/Latte.cf ${BUILD_DIR}
+
+${BUILD_DIR}/ParLatte.hs: ${BUILD_DIR}/ParLatte.y
+	cd ${BUILD_DIR}; happy -gca ParLatte.y
+
 clean:
-	rm -f lat_to_asm latc_x86_64
-	rm -f *.log *.aux *.hi *.o *.dvi
-	rm -f DocLatte.ps
-	rm -f src/*.hi src/*.o
-	rm -f ParLatte.hs ParLatte.y LexLatte.x DocLatte.txt
-	rm -f Latte.cf ErrM.hs PrintLatte.hs TestLatte.hs TestLatte
-	rm -f SkelLatte.hs LexLatte.hs AbsLatte.hs
-	rm -f good/*.s
-	rm -f ./*.dyn_hi
-	rm -f ./*.dyn_o
-	rm -f ./src/*.dyn_hi
-	rm -f ./src/*.dyn_o
-	for f in $(ls ./good/*.lat | cut -d / -f 3 | cut -d . -f 1); do rm -f ./good/$f; done
-
-
-ParLatte.y:	Latte.cf
-	alex -g LexLatte.x
-Latte.cf:
-	cp src/Latte.cf .
-	cp src/AbsLatte.hs .
-	cp src/ErrM.hs .
-	cp src/LexLatte.x .
-	cp src/ParLatte.y .
-	cp src/PrintLatte.hs .
-	cp src/SkelLatte.hs .
-
-ParLatte.hs:	ParLatte.y
-	happy -gca $<
+	@rm -f lat_to_asm_bin latc_x86_64;
+	@rm -rf build;
+	@rm -rf programs;

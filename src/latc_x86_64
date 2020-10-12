@@ -5,7 +5,9 @@ if [ -z "$1" ]; then
     exit
 fi
 
-filepath="${1%.*}"
-filedir=${filepath%/*}
-./lat_to_asm $1
-gcc $filepath.s lib/runtime.o -o $filepath
+filename=$(basename -- "$1")
+filepath_no_extension="${1%.*}"
+filename_no_extension="${filename%%.*}"
+./lat_to_asm_bin $1;
+mv $filepath_no_extension.s programs;
+gcc programs/$filename_no_extension.s lib/runtime.o -o programs/$filename_no_extension;
