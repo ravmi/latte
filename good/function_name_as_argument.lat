@@ -8,4 +8,5 @@ boolean b (boolean a) {
 }
 
 int main() {
+    return 0;
 }
