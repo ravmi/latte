@@ -15,7 +15,6 @@ import System.IO
 import LexLatte
 import ParLatte
 import SkelLatte
-import PrintLatte
 import AbsLatte
 import ErrM
 import ImdLatte

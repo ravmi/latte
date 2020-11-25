@@ -35,6 +35,10 @@ long int* _latte_default_alloc(long int a) {
     return malloc(a);
 }
 
+void _latte_default_free(void* a) {
+    free(a);
+}
+
 void error() {
     fprintf(stderr, "runtime error\n");
     exit(1);

@@ -76,5 +76,4 @@ appendNextUses quads aliveBlockEnd = result where
         (h:_) -> Map.keys h
         _ -> error "appendNextUses" Map.keys $ head revNextResult
     quadsWithUses = zip quads (tail revNextResult)
-    --result = trace (show (map snd quadsWithUses) ++ "<--- NEXT USES ALL\n") (quadsWithUses, aliveStart)
     result =  (quadsWithUses, aliveStart)

@@ -64,7 +64,7 @@ instance Show AmdArg where
     show (AAReg r) = show r
     show (AAMem i) = let
         pos1 = show $ -(8 * (i + 1))
-        pos2 = show $ (1-i) * 8 in --- TODO change it
+        pos2 = show $ (1-i) * 8 in
         case (i >= 0) of
             True -> pos1 ++ "(%rbp)"
             False -> pos2 ++ "(%rbp)"

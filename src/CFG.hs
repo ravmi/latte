@@ -12,8 +12,6 @@ startsBlock :: Quad -> Bool
 startsBlock q = case q of
     QuadNoAssign (OpLabel _) _ _ -> True
     Quad4 _ (OpCall _) _ _ -> True
-    Quad4 _ (OpAllocString _ _) _ _ -> True
-
     _ -> False
 
 isJmp :: Quad -> Bool
@@ -57,7 +55,6 @@ buildCFG blocks = graph where
 cfgHelper1 :: Graph -> Graph -> Graph -> Graph -> Graph -> Int -> (Graph, Graph)
 cfgHelper1 graph useM defM inM outM size = result where
     calcIn n = case (Map.lookup n useM, Map.lookup n outM, Map.lookup n defM) of
-        --(Just nuse, Just nout, Just ndef) -> trace (((show useM) ++ (show defM) ++ (show outM)) ++ (show (n, List.nub (nuse ++ (nout List.\\ ndef))))) (n, List.nub (nuse ++ (nout List.\\ ndef)))
         (Just nuse, Just nout, Just ndef) -> (n, List.nub (nuse ++ (nout List.\\ ndef)))
         _ -> error "buildInout"
     calcOut n = case Map.lookup n graph of
